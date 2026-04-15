@@ -1,39 +1,26 @@
-# Tools and Ecosystem Console
+# Tools and Ecosystem
 
-This document covers advanced tool management and ecosystem operations.
+This guide covers tool architecture, runtime behavior, and ecosystem entities.
 
 ## Tool Registry Model
 
-Tool definitions are persisted in `tool_defs`.
-
-Fields include:
+Definitions live in `tool_defs` with fields such as:
 
 - `name` (unique identifier)
 - `description`
-- `input_schema_json` (JSON schema-like contract)
+- `input_schema_json`
 - `kind` (`builtin`, `shell_command`, ...)
-- `config_json` (executor-specific config)
+- `config_json`
 - `enabled`
 - `is_builtin`
 
-At startup, built-in tools are seeded/upserted.
+Built-ins are upserted at startup and treated as immutable in UI/API.
 
-## Built-in vs Custom Tools
+## Built-in Tool Set
 
-Built-ins:
+### Shell and Filesystem
 
-- maintained by codebase
-- immutable via API/UI
-
-Custom tools:
-
-- created/edited/deleted via API/UI
-- runtime-discoverable and callable by model
-
-## Built-in Tool Families (v1)
-
-### Files and paths
-
+- `shell.exec`
 - `file.read`
 - `file.read_range`
 - `file.write`
@@ -50,7 +37,7 @@ Custom tools:
 - `json.parse`
 - `json.query`
 
-### Browser (single-tab session)
+### Browser
 
 - `browser.open`
 - `browser.snapshot`
@@ -58,68 +45,94 @@ Custom tools:
 - `browser.wait`
 - `browser.close`
 
-Browser tools use a single-tab session per run and default to Docker-backed Playwright with local fallback when enabled.
+### Run Artifacts and Utility
 
-## Custom Tool Kind: `shell_command`
+- `artifact.list`
+- `artifact.get`
+- `test.run`
 
-Config:
+## Browser Runtime Details
+
+Browser tools are single-session-per-run and support:
+
+- Docker-backed Playwright by default
+- optional local fallback
+- screenshot artifact persistence
+
+Recommended operation:
+
+- pin `COLOSSEUM_BROWSER_IMAGE` to the exact Playwright version in use
+- keep fallback enabled for resilience during local/dev setups
+
+## Custom Tools
+
+Current custom kind:
+
+- `shell_command`
+
+Key config:
 
 - `command_template` with `{{param}}` placeholders
 - `timeout_seconds`
 
-Execution:
+Execution flow:
 
-1. Runtime resolves tool by name.
-2. Placeholder values are substituted from tool input.
-3. Command executes in run workspace context.
+1. resolve definition by tool name
+2. render template from input args
+3. execute in run workspace context
+4. return output/log artifacts
 
 ## Tool Governance
 
-Tool usage is bounded by:
+Tool execution is controlled by:
 
-- Agent `allowed_tools` list
-- policy evaluation in runtime
-- approval gating for risky shell actions
+- agent-level `allowed_tools`
+- policy engine evaluation (`allow`, `deny`, `require approval`)
+- tool-specific guardrails (for example host/scheme checks for web/browser tools)
 
-## Tool Test Runner
+## Tool Testing
 
-Use `POST /api/tools/:id/test` (or UI equivalent) to validate tool behavior.
+Use tool test runner (`POST /api/tools/{id}/test`) or UI test console.
 
-Inputs:
+Input:
 
-- `workspace_path`
-- tool `input` JSON
+- workspace path
+- JSON tool input
 
-Outputs:
+Output:
 
 - `ok`
 - `output`
 - `log`
 - optional `error`
 
-## Ecosystem Entities
+## Ecosystem Resources
 
-## Workflows
+### Workflows
 
-Stored in `workflow_defs` with arbitrary `definition_json`.
+- stored in `workflow_defs`
+- optional links to runs via `workflow_runs`
 
-## Policies
+### Policies
 
-Stored in `policies` and evaluated during tool execution.
+- stored in `policies`
+- evaluated before tool execution
 
-## Secrets
+### Secrets
 
-Stored in `secrets` (value not returned by list endpoint).
+- stored in `secrets`
+- list endpoints do not return secret plaintext
 
-## Provider Configs
+### Provider Configs
 
-Stored in `provider_configs` for profile-based provider wiring and future routing.
+- stored in `provider_configs`
+- used for provider profile management and future routing patterns
 
-## Recommended Operational Pattern
+## Practical Rollout Pattern
 
-1. Define tools and test them in isolation.
-2. Apply policy constraints.
-3. Bind tools to agent profiles.
-4. Run with approvals enabled for risky actions.
-5. Iterate from session debug timeline and run exports.
+1. enable minimum required tools for each agent
+2. test custom tools in isolation
+3. apply policy gates for risky operations
+4. monitor run telemetry and artifacts
+5. iterate based on transcript/debug evidence
 

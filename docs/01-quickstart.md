@@ -1,29 +1,27 @@
 # Quickstart
 
-This guide gets `colosseum` running locally with a working UI and API in minutes.
+This guide gets `colosseum` running locally in minutes.
 
 ## Prerequisites
 
 - Linux host (x86_64 or arm64)
 - Docker daemon available to the current user
 - Go toolchain compatible with this repository
-- Node.js + npm (for local UI development only)
-- At least one provider key:
+- Node.js + npm (only required for UI development or rebuilding UI assets)
+- At least one model provider key:
   - `OPENAI_API_KEY`
   - `ANTHROPIC_API_KEY`
 
 ## Build
-
-From the repository root:
 
 ```bash
 cd colosseum
 make build
 ```
 
-This compiles the backend and embeds built UI assets into `bin/colosseum`.
+This produces `bin/colosseum` with embedded UI assets.
 
-## Run
+## Start Server
 
 ```bash
 OPENAI_API_KEY=... \
@@ -34,29 +32,38 @@ ANTHROPIC_API_KEY=... \
 Open:
 
 - UI: `http://127.0.0.1:8080`
-- Health: `http://127.0.0.1:8080/healthz`
-- Ready: `http://127.0.0.1:8080/readyz`
+- Health check: `http://127.0.0.1:8080/healthz`
+- Readiness check: `http://127.0.0.1:8080/readyz`
 
 ## First End-to-End Run
 
-1. Go to **Agents** and create an agent.
-2. Go to **Runs** and submit a task.
-3. Leave `workspace_path` empty to let `colosseum` auto-manage it.
-4. Optionally set `source_workspace_path` to clone/seed an existing directory.
-5. Open run detail and monitor:
-   - Transcript
-   - Debug timeline
-   - Events
-6. If interrupted by approval policy, approve and resume.
+1. Go to **Agents**.
+2. Create an agent profile:
+   - name + description
+   - provider/model
+   - system prompt
+   - allowed tools
+3. Go to **Runs** and create a run with:
+   - agent
+   - task
+4. Open **Run Detail** and monitor:
+   - run outcome
+   - timeline
+   - transcript accordions (inspector + per-step artifacts)
+5. If policy gates a tool call, approve and continue.
 
-## Shutdown
+Notes:
 
-- `Ctrl+C` once: graceful and quick shutdown
-- `Ctrl+C` twice: immediate forced exit
+- Workspaces are auto-managed by default under `COLOSSEUM_WORKSPACE_ROOT`.
+- Browser artifact previews (screenshots) are available directly from run detail.
+- Steering a run appends a new user message and can re-queue terminal runs for continuation.
 
-## Local Development Mode
+## Shutdown Behavior
 
-Use split dev mode if iterating on UI + backend:
+- `Ctrl+C` once: graceful shutdown
+- `Ctrl+C` again: immediate exit
+
+## Local Dev Mode
 
 ```bash
 cd colosseum
@@ -64,8 +71,5 @@ make ui-install
 make dev
 ```
 
-This starts:
-
-- backend server
-- Vite frontend dev server
+`make dev` runs backend + Vite dev server for iterative frontend/backend development.
 

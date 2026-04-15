@@ -1,71 +1,80 @@
 # Security and Reliability
 
-This guide summarizes practical security posture and reliability behavior in the current implementation.
+This guide summarizes the current operational security posture and runtime reliability behavior.
 
-## Security Posture
+## Security Model
 
-## Execution isolation
+### Execution Isolation
 
-- Commands are intended to execute in Docker run workspaces.
-- Workspace paths are constrained and mounted into container runtime.
+- tool execution is workspace-scoped
+- Docker-backed execution is the default model for browser tooling
+- path handling includes confinement checks in file/path tool handlers
 
-## Tool boundaries
+### Tool Boundaries
 
-- Tool definitions are explicit and schema-driven.
-- Unknown tools are rejected.
-- Agent-level `allowed_tools` can restrict callable tools.
+- explicit tool registry definitions with schemas
+- unknown/disabled tools are rejected
+- per-agent `allowed_tools` restricts callable surface area
 
-## Risk controls
+### Policy and Approval Gates
 
-- Policy checks run before tool execution.
-- Risky commands can require explicit human approval.
+- policy engine evaluates each tool call
+- decisions: allow / deny / require approval
+- high-risk actions can force `interrupted` state until operator approval
 
-## Secret handling
+### Provider and Secret Safety
 
-- Secrets are persisted and not returned in list payloads.
-- Runtime logs and traces should avoid raw secret exposure.
+- provider credentials are supplied via environment variables
+- secrets store endpoints do not leak plaintext in list views
+- dynamic provider visibility reduces accidental misconfiguration in UI
 
-## Recommendations
+### Network/Data Guardrails
 
-- run `colosseum` under least-privilege OS account
-- keep workspace/artifact roots scoped and isolated
-- use dedicated Docker daemon/profile for agent workloads
-- rotate provider credentials regularly
-- enforce outbound restrictions at host/network layer
+- web/browser tools include host/scheme validation paths
+- local/metadata targets can be blocked or approval-gated by policy
 
 ## Reliability Model
 
-## Durable state
+### Durable State
 
-Core run state and telemetry are persisted in SQLite:
+Primary execution history is persisted in SQLite:
 
-- runs
-- steps
-- tool calls
-- events
-- spans
+- runs, run_steps, tool_calls
+- events, trace_spans
+- approvals
+- artifacts
 
-## Recovery behavior
+### Recovery Semantics
 
-- in-flight `running` runs are re-queued on startup
-- runtime can resume execution from persisted state
-- operator can interrupt/resume/approve from UI/API
+- startup recovery re-queues stale `running` runs
+- operator can resume/interrupt/approve at runtime
+- steer events append new user messages and can continue terminal runs
 
-## Timeouts and retries
+### Browser Reliability
 
-- model call retries with exponential backoff
-- tool command timeout enforcement
-- output truncation protection for large logs
+- docker-first browser execution
+- optional local fallback
+- explicit Playwright version matching guard to avoid mismatched image/runtime failures
 
-## Graceful shutdown
+### Fault Tolerance
 
-- first `Ctrl+C` triggers quick graceful shutdown
-- second `Ctrl+C` forces immediate process exit
-- runtime workers observe cancellation context
+- model retries with exponential backoff
+- tool timeout controls
+- bounded output handling for large payloads
+- run status transitions are persisted at each major boundary
 
-## Known Current Limits
+## Operational Hardening Checklist
 
-- single-node architecture (no distributed scheduler yet)
-- SQLite local durability (no HA DB replication)
-- policy engine currently focused on practical guardrails, not formal policy DSL
+- run under a least-privilege OS account
+- isolate DB/artifact/workspace directories with strict permissions
+- use constrained Docker context/profile for agent workloads
+- pin browser image versions to known-good builds
+- rotate provider credentials and audit environment handling
+- apply egress/network controls at host or network boundary
+
+## Current Limits
+
+- single-node architecture (no distributed scheduler)
+- SQLite local durability (no built-in HA replication)
+- policy model is pragmatic and rule-based, not a full policy DSL
 

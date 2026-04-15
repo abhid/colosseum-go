@@ -1,53 +1,56 @@
 # Configuration
 
-`colosseum` configuration is provided via environment variables and CLI flags.
+`colosseum` reads configuration from CLI flags and environment variables.
 
 Precedence:
 
-1. Explicit flags
-2. Environment variables
-3. Built-in defaults
+1. CLI flags
+2. environment variables
+3. built-in defaults
 
-## Server Flags
+## CLI Flags
 
-- `--bind`  
-  Full bind address (`ip:port`). If set, it overrides `--listen-ip` and `--port`.
-- `--listen-ip`  
-  Listen host/IP.
-- `--port`  
-  Listen port.
-- `--db`  
-  SQLite database path.
-- `--artifacts`  
-  Artifact root directory.
-- `--workspace-root`  
-  Managed run workspace root directory.
-- `--model`  
-  Default model fallback.
+- `--bind` full bind address (`ip:port`)
+- `--listen-ip` listen IP/host
+- `--port` listen port
+- `--db` SQLite path
+- `--artifacts` artifact root path
+- `--workspace-root` managed workspace root
+- `--model` default model fallback
 
 ## Environment Variables
+
+### Server Core
 
 - `COLOSSEUM_BIND`
 - `COLOSSEUM_LISTEN_IP`
 - `COLOSSEUM_PORT`
-- `COLOSSEUM_DB_PATH`
-- `COLOSSEUM_ARTIFACT_PATH`
-- `COLOSSEUM_WORKSPACE_ROOT`
-- `COLOSSEUM_DOCKER_IMAGE`
+- `COLOSSEUM_DB_PATH` (default: `./colosseum.db`)
+- `COLOSSEUM_ARTIFACT_PATH` (default: `./artifacts`)
+- `COLOSSEUM_WORKSPACE_ROOT` (default: `./workspaces`)
 - `COLOSSEUM_DEFAULT_MODEL`
-- `COLOSSEUM_BROWSER_MODE` (`docker`, `local`, `auto`)
-- `COLOSSEUM_BROWSER_IMAGE` (Playwright image used for docker browser backend)
+- `COLOSSEUM_DOCKER_IMAGE` (tool/docker execution image for applicable workloads)
+- `DOCKER_HOST` (optional custom docker daemon)
+
+### Browser Runtime
+
+- `COLOSSEUM_BROWSER_MODE` (`docker` or `local`)
+- `COLOSSEUM_BROWSER_IMAGE` (default: `mcr.microsoft.com/playwright:v1.59.1-jammy`)
 - `COLOSSEUM_BROWSER_FALLBACK` (`true`/`false`)
+- `COLOSSEUM_PLAYWRIGHT_NODE_PATH` (optional explicit local `node_modules` path for playwright resolution)
+
+### Providers
+
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
-- `DOCKER_HOST` (if non-default docker host is required)
 
-## Recommended Local Config
+Provider visibility in UI is dynamic: providers are shown only when corresponding credentials are configured.
+
+## Recommended Local Command
 
 ```bash
-export OPENAI_API_KEY=...
-export ANTHROPIC_API_KEY=...
-
+OPENAI_API_KEY=... \
+ANTHROPIC_API_KEY=... \
 ./bin/colosseum server \
   --listen-ip 127.0.0.1 \
   --port 8080 \
@@ -56,24 +59,26 @@ export ANTHROPIC_API_KEY=...
   --workspace-root ./workspaces
 ```
 
-## Workspace Management
+## Workspace Behavior
 
-On run creation:
+For normal run creation, workspace paths are auto-managed. `colosseum` creates run workspaces under `workspace-root/<run_id>`.
 
-- If `workspace_path` is omitted, `colosseum` creates one under `workspace-root/<run_id>`.
-- If `source_workspace_path` is provided, contents are copied into the run workspace.
+The API still supports optional explicit workspace fields for advanced integrations, but the operator UI defaults to auto-managed workspaces.
 
-## Docker Runtime Defaults
+## Browser Version Matching
 
-- Docker image default is configured via `COLOSSEUM_DOCKER_IMAGE`.
-- Workspace mount target is `/workspace`.
-- Tool commands execute inside that mounted workspace.
+When `COLOSSEUM_BROWSER_MODE=docker`, the runtime validates that:
 
-## Operational Notes
+- local Playwright package version
+- Playwright docker image tag version
 
-- Ensure the process user can read/write:
-  - DB path
-  - artifact directory
-  - workspace root
-- Ensure docker CLI/daemon access for sandboxed tool execution.
+are compatible. Mismatch causes a clear actionable error.
+
+Recommendation: pin image version explicitly to match installed Playwright.
+
+## Operational Checklist
+
+- process user can read/write DB, artifact root, workspace root
+- docker daemon reachable for docker-backed tools
+- provider keys available when provider-backed features are expected
 

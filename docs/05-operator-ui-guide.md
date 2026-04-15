@@ -1,86 +1,97 @@
 # Operator UI Guide
 
-The UI is designed for active run operations and deep debugging.
+This guide focuses on real operator workflows in the current UI.
 
-## Main Navigation
+## Navigation
 
-- **Runs**: submit and monitor runs
-- **Session Detail**: transcript/debug/events + controls
-- **Agents**: create/edit reusable agent profiles
-- **Tools**: manage tool registry and test tools
+- **Runs**: create runs and monitor recent status
+- **Run Detail**: full execution surface (timeline, transcript, debug, events)
+- **Agents**: reusable profiles for provider/model/system prompt/tools
+- **Tools**: built-in/custom tool management + test runner
 - **Ecosystem**: workflows, policies, secrets, provider configs
-- **Approvals**: interrupted runs requiring operator action
-- **Settings**: provider capability and environment status
+- **Approvals**: policy-gated runs requiring human action
+- **Settings**: provider and environment visibility
 
 ## Runs Page
 
-Use this page to:
+Create run requires:
 
-- create runs from agents
-- set optional workspace path
-- seed from source workspace path
-- inspect recent run status quickly
+- `agent`
+- `task`
 
-## Session Detail Page
+Workspace is auto-managed by default. Advanced workspace controls are not shown in the default UI.
 
-`Session Detail` is the primary operations and debugging surface.
+## Agents Page
 
-### Header controls
+### Create/Edit Agent
 
-- interrupt / resume run
-- approve pending gate
-- export run bundle
-- send steering message
+- unified provider/model field (`OpenAI/<model>` or `Anthropic/<model>`)
+- system prompt with `AI Enhance` action
+- allowed tools accordion (collapsed by default) with filterable grouped checkboxes
 
-### Transcript tab
+### AI Enhance
 
-- chronological event transcript
-- readable payload rendering
-- filter by event text/payload
+The button calls prompt enhancement API and rewrites the system prompt into a stronger runtime harness prompt.
 
-### Debug tab
+### Delete Agent
 
-- multi-lane timeline (model/tools/system)
-- click span segments to inspect details
-- right-side inspector for selected span metadata
+- regular delete first
+- if runs exist, operator is prompted for force delete (deletes run history, then agent)
+- clear inline error feedback appears for blocked delete operations
 
-### Events tab
+## Run Detail Page
 
-- dense tabular event feed
-- raw payload-first inspection mode
+This is the primary operations and debugging surface.
 
-### Artifacts section
+### Header + Controls
 
-- lists logs/outputs/patch artifacts
-- copy artifact path directly
+- run status, provider/model, metrics
+- interrupt, resume, approve, restart run, refresh, export bundle
+- steer input: appends message and can continue/re-queue run
 
-## Tools Console
+### Run Outcome
 
-Use Tools Console to:
+- final summarized result text
+- output artifacts inline (including screenshot previews when available)
 
-- create custom tools
-- edit and enable/disable custom tools
-- view built-in tool definitions
-- test tools against a target workspace with JSON inputs
+### Session Timeline
 
-Built-in tools are immutable by design.
+- lane-based timeline by actor category
+- click spans for debug detail in Debug tab
 
-## Ecosystem Console
+### Transcript Tab
 
-Use this console to centrally manage:
+- each event row is an accordion
+- expanded row includes:
+  - embedded inspector payload JSON
+  - per-step artifacts (logs/images/etc.)
+- `Restart here` action available by step
 
-- workflow templates
-- policy definitions
-- secrets metadata + lifecycle
-- provider configuration profiles
+### Debug Tab
 
-## Approvals
+- trace spans list
+- tool calls list
+- selected tool call request/response payloads
 
-Runs that trigger risky actions can enter `interrupted` state.
+### Events Tab
 
-Operator flow:
+- dense tabular event stream for quick scanning/filtering
 
-1. Open run details
-2. Review transcript/debug context
-3. Approve to re-queue and continue
+## Approvals Workflow
+
+When a run hits a policy gate:
+
+1. status becomes `interrupted`
+2. inspect context in transcript/debug
+3. approve from run detail (or approvals view)
+4. run continues from queued state
+
+## Steering Workflow
+
+Use steer to continue or redirect work:
+
+1. enter instruction in steer input
+2. submit
+3. runtime appends instruction as a user message
+4. run continues (including from completed/failed/cancelled/interrupted via auto re-queue behavior)
 

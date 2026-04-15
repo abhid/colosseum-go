@@ -1,16 +1,14 @@
 # Troubleshooting
 
-Common operational issues and fixes.
+Common issues and direct fixes.
 
-## Server does not start
+## Server Start / Port Bind Errors
 
-### Symptom
+Symptom:
 
-- startup exits with bind error
+- startup fails with bind/listen error
 
-### Fix
-
-- change bind parameters:
+Fix:
 
 ```bash
 ./bin/colosseum server --listen-ip 127.0.0.1 --port 8090
@@ -18,115 +16,134 @@ Common operational issues and fixes.
 
 or set `--bind`.
 
-## Ready check fails
+## `/readyz` Fails
 
-### Symptom
+Symptom:
 
-- `/readyz` returns error
+- health works, readiness fails
 
-### Fix
+Fix:
 
-- ensure DB path is writable
-- verify migration succeeded
-- check filesystem permissions for db/artifacts/workspaces
+- verify DB path is writable
+- confirm migrations applied successfully
+- check permissions for DB/artifacts/workspaces roots
 
-## Run fails with provider 400 errors
+## Changes “Didn’t Work”
 
-### Examples
+Symptom:
 
-- invalid tool function name format
-- tool-role message sequencing errors
+- behavior still old after code edits
 
-### Fix
+Cause:
 
-- ensure latest binary is running (provider adapter normalization fixes are included)
-- verify tool names in registry are valid and non-empty
-- inspect run transcript/debug events for malformed payloads
+- running binary predates source changes
 
-## Docker execution errors
-
-### Symptom
-
-- tool execution fails before command runs
-
-### Fix
-
-- verify docker daemon is running
-- verify process user can run docker CLI
-- verify configured image is pullable
-- verify workspace path exists and is accessible
-
-## Browser tool backend errors
-
-### Symptom
-
-- `browser.*` tool calls fail with docker runtime errors
-
-### Fix
-
-- verify docker daemon is running and accessible
-- verify `COLOSSEUM_BROWSER_IMAGE` is pullable
-- if needed, set `COLOSSEUM_BROWSER_MODE=local`
-- keep `COLOSSEUM_BROWSER_FALLBACK=true` to auto-fallback from docker backend
-
-## Custom tool test returns unknown tool
-
-### Symptom
-
-- `unknown tool` in test result
-
-### Fix
-
-- verify tool is enabled in `tool_defs`
-- verify tool name is unique and saved correctly
-
-## Runs remain interrupted
-
-### Symptom
-
-- run status does not progress after policy gate
-
-### Fix
-
-- approve from UI or `POST /api/runs/:id/approve`
-- if needed, call resume endpoint
-
-## UI seems stale
-
-### Symptom
-
-- run updates lag
-
-### Fix
-
-- verify SSE endpoint reachable: `/api/stream/runs/:id`
-- hard-refresh browser if development assets changed
-
-## Visual test snapshot mismatch
-
-### Symptom
-
-- Playwright visual tests fail after UI changes
-
-### Fix
+Fix:
 
 ```bash
-cd ui
-npx playwright test --update-snapshots
-npm run test:visual
+make build
+# restart running server process
+./bin/colosseum server --listen-ip 127.0.0.1 --port 8080
 ```
 
-## Fast diagnostics commands
+## Browser Tool Errors
+
+### Playwright version mismatch
+
+Symptom:
+
+- browser launch errors referencing missing executable/module
+
+Fix:
+
+- align `COLOSSEUM_BROWSER_IMAGE` version with installed Playwright version
+- keep browser fallback enabled if desired:
+  - `COLOSSEUM_BROWSER_FALLBACK=true`
+
+### Docker unavailable
+
+Symptom:
+
+- `docker browser exec failed ...`
+
+Fix:
+
+- confirm Docker daemon access for runtime user
+- pull browser image manually
+- switch to local mode if needed:
+  - `COLOSSEUM_BROWSER_MODE=local`
+
+## Artifact Open/Preview Fails
+
+Symptom:
+
+- screenshot artifact cannot be opened
+
+Fix:
+
+- ensure server is running a build that includes artifact content endpoint and browser screenshot path rewrite fixes
+- regenerate screenshot artifacts after restart if old records reference container-only paths
+
+## Agent Delete Fails
+
+Symptom:
+
+- delete button appears non-functional
+
+Fix:
+
+- UI now surfaces exact backend reason
+- if blocked by runs, use force delete confirmation flow to remove run history and delete agent
+- if blocked by eval suite references, remove/reassign suite first
+
+## Steer Event Does Not Continue Run
+
+Symptom:
+
+- steering completed/interrupted run appears ignored
+
+Fix:
+
+- verify server restarted with steer-continuation patch
+- check `POST /api/runs/{id}/events` response status
+- confirm run transitions back to `queued` and receives new `user.event`
+
+## Runs Stay Interrupted
+
+Symptom:
+
+- run never resumes after policy gate
+
+Fix:
+
+- approve: `POST /api/runs/{id}/approve`
+- resume if needed: `POST /api/runs/{id}/resume`
+
+## UI Appears Stale
+
+Symptom:
+
+- run detail not updating live
+
+Fix:
+
+- verify SSE endpoint: `/api/stream/runs/{id}`
+- hard-refresh browser when frontend assets changed
+
+## Fast Diagnostics
 
 ```bash
-# API health
+# health
 curl -s http://127.0.0.1:8080/healthz
 curl -s http://127.0.0.1:8080/readyz
 
-# list runs
+# runs
 curl -s http://127.0.0.1:8080/api/runs
 
-# inspect run telemetry
+# telemetry
 curl -s http://127.0.0.1:8080/api/runs/<run-id>/telemetry
+
+# artifacts
+curl -s http://127.0.0.1:8080/api/runs/<run-id>/artifacts
 ```
 

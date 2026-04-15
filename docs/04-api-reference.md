@@ -11,47 +11,80 @@ All endpoints return JSON unless otherwise noted.
 
 ## Agents
 
-- `POST /agents` create agent
-- `GET /agents` list agents
-- `PUT /agents/:id` update agent
+- `POST /agents`
+- `GET /agents`
+- `PUT /agents/{id}`
+- `DELETE /agents/{id}`
 
-Example create payload:
+Agent delete supports force mode:
+
+- `DELETE /agents/{id}?force=1`
+- force mode deletes run history owned by the agent, then deletes the agent
+- delete still fails if agent is referenced by eval suites
+
+Create/update payload:
 
 ```json
 {
   "name": "Code Fixer",
   "description": "Autonomous code repair",
   "provider": "openai",
-  "model": "gpt-4.1-mini",
+  "model": "gpt-5.4",
   "system_prompt": "Be concise and safe.",
-  "allowed_tools": ["shell.exec", "file.read", "file.write"]
+  "allowed_tools": ["shell.exec", "file.read", "apply.patch"]
+}
+```
+
+## Providers and Prompt Enhancement
+
+- `GET /providers`
+- `GET /providers/openai/models`
+- `POST /prompts/enhance`
+
+Enhance payload:
+
+```json
+{
+  "prompt": "You are a coding assistant.",
+  "provider": "openai",
+  "model": "gpt-5.4"
 }
 ```
 
 ## Runs
 
-- `POST /runs` create run
-- `GET /runs` list runs
-- `GET /runs/:id` get run
-- `GET /runs/:id/trace` event trace
-- `GET /runs/:id/telemetry` steps/tool_calls/spans/events
-- `GET /runs/:id/artifacts` list artifacts
-- `GET /runs/:id/export` download run bundle
-- `POST /runs/:id/cancel`
-- `POST /runs/:id/interrupt`
-- `POST /runs/:id/resume`
-- `POST /runs/:id/approve`
-- `POST /runs/:id/events` append steering event
-- `GET /stream/runs/:id` SSE stream
+- `POST /runs`
+- `GET /runs`
+- `GET /runs/{id}`
+- `POST /runs/{id}/replay`
+- `GET /runs/{id}/trace`
+- `GET /runs/{id}/telemetry`
+- `GET /runs/{id}/artifacts`
+- `GET /runs/{id}/artifacts/{artifactID}/content` (raw file content stream)
+- `GET /runs/{id}/export`
+- `POST /runs/{id}/cancel`
+- `POST /runs/{id}/interrupt`
+- `POST /runs/{id}/resume`
+- `POST /runs/{id}/approve`
+- `POST /runs/{id}/events` (steer message append + auto re-queue for terminal/interrupted runs)
 
-Example run payload:
+Create run payload:
 
 ```json
 {
   "agent_id": "agent-id",
   "task": "Fix failing tests and summarize changes",
-  "source_workspace_path": "/home/user/repo",
+  "provider": "openai",
+  "model": "gpt-5.4",
   "max_steps": 30
+}
+```
+
+Steer event payload example:
+
+```json
+{
+  "message": "Continue from the last result and include exact commands used."
 }
 ```
 
@@ -59,11 +92,11 @@ Example run payload:
 
 - `GET /tools`
 - `POST /tools`
-- `PUT /tools/:id`
-- `DELETE /tools/:id`
-- `POST /tools/:id/test`
+- `PUT /tools/{id}`
+- `DELETE /tools/{id}`
+- `POST /tools/{id}/test`
 
-Example custom tool:
+Custom tool (`shell_command`) example:
 
 ```json
 {
@@ -87,42 +120,51 @@ Example custom tool:
 
 - `GET /workflows`
 - `POST /workflows`
-- `PUT /workflows/:id`
-- `DELETE /workflows/:id`
+- `PUT /workflows/{id}`
+- `DELETE /workflows/{id}`
 
 ## Policies
 
 - `GET /policies`
 - `POST /policies`
-- `PUT /policies/:id`
-- `DELETE /policies/:id`
+- `PUT /policies/{id}`
+- `DELETE /policies/{id}`
 
 ## Secrets
 
 - `GET /secrets` (metadata only)
 - `POST /secrets`
-- `DELETE /secrets/:name`
+- `DELETE /secrets/{name}`
 
 ## Provider Configs
 
 - `GET /provider-configs`
 - `POST /provider-configs`
-- `PUT /provider-configs/:id`
-- `DELETE /provider-configs/:id`
+- `PUT /provider-configs/{id}`
+- `DELETE /provider-configs/{id}`
 
-## Providers
+## Evals
 
-- `GET /providers` static capabilities list
+- `GET /evals/suites`
+- `POST /evals/suites`
+- `GET /evals/suites/{id}`
+- `PUT /evals/suites/{id}`
+- `POST /evals/suites/{id}/runs`
+- `GET /evals/suites/{id}/regression`
+- `GET /evals/runs`
+- `GET /evals/runs/{id}`
 
-## SSE Stream Format
+## SSE Stream
 
-Endpoint: `GET /api/stream/runs/:id`
+Endpoint:
 
-Event type:
+- `GET /api/stream/runs/{id}`
+
+Event name:
 
 - `run_event`
 
-Data payload includes:
+Data payload fields:
 
 - `id`
 - `step_id`

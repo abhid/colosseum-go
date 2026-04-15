@@ -1,6 +1,6 @@
 # Development and Contributing
 
-This guide is for contributors extending backend runtime, provider adapters, tooling, and UI surfaces.
+This guide is for contributors extending runtime behavior, APIs, tools, and UI.
 
 ## Local Setup
 
@@ -10,80 +10,83 @@ make ui-install
 go mod tidy
 ```
 
-## Development Commands
+## Daily Commands
 
-From `colosseum/`:
+From repo root:
 
-- `make dev` – backend + Vite dev
-- `make build` – production build with embedded UI
-- `make test` – Go tests
-- `make ui-build` – UI production build
+- `make dev` backend + Vite dev
+- `make build` production build (embedded UI)
+- `make test` Go tests
+- `make ui-build` UI production build
 
-From `colosseum/ui`:
+From `ui/`:
 
 - `npm run build`
 - `npm run test`
 - `npm run test:visual`
 
-## Testing Strategy
+## Test Expectations
 
-## Backend
+### Backend
 
-- unit/integration in `internal/*`
+- unit/integration coverage under `internal/*`
 - provider adapter tests in `internal/providers`
-- runtime integration tests in `internal/runtime`
+- orchestration tests in `internal/runtime`
+- tool/policy tests when changing tool execution or guardrails
 
-## Frontend
+### Frontend
 
-- component tests via Vitest
-- visual regression via Playwright
+- compile cleanly (`npm run build`)
+- maintain behavior in run/agents/tools surfaces
+- update visual tests where snapshots are intentionally changed
 
-## Migrations
+## Migration Rules
 
-All schema changes must be additive migration files in:
-
-- `internal/db/migrations`
+Schema changes must be additive migration files under `internal/db/migrations`.
 
 Rules:
 
-- never edit previously applied migration files
-- add new numbered migration files
-- keep backward-compatible evolution where possible
+- never edit previously-applied migrations
+- add a new numbered migration
+- preserve backward compatibility where feasible
 
-## Adding a New Built-in Tool
+## Extending Built-in Tools
 
-1. Add definition in `tools.Builtins()`.
-2. Implement execution branch in `Executor.Execute`.
-3. Ensure startup seeding updates `tool_defs`.
-4. Add test coverage where appropriate.
+1. add definition in `internal/tools` builtins registry
+2. add execution branch in `Executor.Execute`
+3. apply policy changes if needed (`internal/policy`)
+4. add tests for handler behavior and policy decisions
+5. update docs (`06-tools-and-ecosystem.md`, API docs if needed)
 
-## Adding a Custom Tool Kind
+## Extending Runtime Behavior
 
-1. Extend `tool_defs.kind` handling in `Executor.customTool`.
-2. Define expected `config_json` contract.
-3. Add Tool Console UX support.
-4. Add API and runtime validation tests.
+When changing run lifecycle (resume, steer, replay, completion semantics):
 
-## Adding a Provider Adapter
+1. update `internal/runtime`
+2. verify status transitions + persisted events
+3. test interaction with approvals/policy/tool execution
+4. update operator docs and troubleshooting sections
 
-1. Implement `providers.Client`.
-2. Normalize tool-calling semantics to internal `ToolCall`.
-3. Capture usage metrics and raw payload.
-4. Add parser and error-handling tests.
+## Provider Integration Guidelines
 
-## Documentation Standards
+1. implement `providers.Client`
+2. normalize tool-calling semantics to internal shape
+3. include usage extraction
+4. ensure robust error handling and retries
 
-- Keep docs aligned with actual routes and behavior.
-- Update API docs for any endpoint changes.
-- Update UI guide for any significant UX or workflow changes.
-- Include troubleshooting entries for recurring operational errors.
+## Documentation Quality Bar
+
+For any feature change:
+
+- API route and payloads documented
+- operator-visible behavior documented
+- configuration knobs documented
+- troubleshooting entries added for likely failure modes
 
 ## Release Checklist
 
-- Go tests pass: `go test ./...`
-- UI tests pass:
-  - `npm run test`
-  - `npm run test:visual`
-- full build passes: `make build`
-- docs updated for new capabilities
+- `go test ./...` passes
+- `npm run build` passes in `ui/`
+- `make build` passes
+- docs updated and consistent with shipped behavior
 
