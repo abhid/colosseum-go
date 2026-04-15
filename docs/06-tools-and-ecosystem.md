@@ -108,11 +108,6 @@ Output:
 
 ## Ecosystem Resources
 
-### Workflows
-
-- stored in `workflow_defs`
-- optional links to runs via `workflow_runs`
-
 ### Policies
 
 - stored in `policies`

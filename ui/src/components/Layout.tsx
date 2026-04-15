@@ -1,14 +1,15 @@
 import { Link, NavLink } from 'react-router-dom'
-import { IconRobot, IconPlayerPlay, IconScale, IconShieldCheck, IconTool, IconNetwork, IconFlask } from '@tabler/icons-react'
+import { IconRobot, IconPlayerPlay, IconScale, IconShieldCheck, IconTool, IconCloud, IconLock } from '@tabler/icons-react'
 import type { PropsWithChildren } from 'react'
 import colosseumLogo from '../assets/colosseum-logo.png'
 
 const nav = [
-  { to: '/', label: 'Runs', icon: IconPlayerPlay },
+  { to: '/sessions', label: 'Sessions', icon: IconPlayerPlay },
   { to: '/agents', label: 'Agents', icon: IconRobot },
   { to: '/tools', label: 'Tools', icon: IconTool },
-  { to: '/evaluations', label: 'Evaluations', icon: IconFlask },
-  { to: '/ecosystem', label: 'Ecosystem', icon: IconNetwork },
+  { to: '/environments', label: 'Environments', icon: IconCloud },
+  { to: '/credential-vaults', label: 'Credential Vaults', icon: IconLock },
+  { to: '/policies', label: 'Policies', icon: IconShieldCheck },
   { to: '/approvals', label: 'Approvals', icon: IconShieldCheck },
   { to: '/settings', label: 'Settings', icon: IconScale },
 ]
@@ -18,7 +19,7 @@ export function Layout({ children }: PropsWithChildren) {
     <div className="min-h-screen bg-[#fafafa] text-sm font-sans text-gray-900">
       <div className="mx-auto grid min-h-screen max-w-[1500px] grid-cols-[240px_minmax(0,1fr)]">
         <aside className="border-r border-gray-200 bg-[#fafafa] px-4 py-6">
-          <Link to="/" className="mb-8 flex items-center gap-2 text-lg font-semibold tracking-tight text-gray-900">
+          <Link to="/sessions" className="mb-8 flex items-center gap-2 text-lg font-semibold tracking-tight text-gray-900">
             <img src={colosseumLogo} alt="Colosseum logo" className="h-8 w-8 rounded object-contain" />
             colosseum
           </Link>

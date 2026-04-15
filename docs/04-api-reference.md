@@ -20,7 +20,6 @@ Agent delete supports force mode:
 
 - `DELETE /agents/{id}?force=1`
 - force mode deletes run history owned by the agent, then deletes the agent
-- delete still fails if agent is referenced by eval suites
 
 Create/update payload:
 
@@ -116,13 +115,6 @@ Custom tool (`shell_command`) example:
 }
 ```
 
-## Workflows
-
-- `GET /workflows`
-- `POST /workflows`
-- `PUT /workflows/{id}`
-- `DELETE /workflows/{id}`
-
 ## Policies
 
 - `GET /policies`
@@ -142,17 +134,6 @@ Custom tool (`shell_command`) example:
 - `POST /provider-configs`
 - `PUT /provider-configs/{id}`
 - `DELETE /provider-configs/{id}`
-
-## Evals
-
-- `GET /evals/suites`
-- `POST /evals/suites`
-- `GET /evals/suites/{id}`
-- `PUT /evals/suites/{id}`
-- `POST /evals/suites/{id}/runs`
-- `GET /evals/suites/{id}/regression`
-- `GET /evals/runs`
-- `GET /evals/runs/{id}`
 
 ## SSE Stream
 

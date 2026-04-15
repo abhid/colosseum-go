@@ -70,14 +70,23 @@ func (m *Manager) EnsureRunContainer(ctx context.Context, runID, workspace strin
 	return dockerID, nil
 }
 
-func (m *Manager) Exec(ctx context.Context, runID, workspace, command string, timeout time.Duration) (string, string, int, error) {
+func (m *Manager) Exec(ctx context.Context, runID, workspace string, envVars map[string]string, command string, timeout time.Duration) (string, string, int, error) {
 	containerID, err := m.EnsureRunContainer(ctx, runID, workspace, 200000, 2048, false)
 	if err != nil {
 		return "", "", 0, err
 	}
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(execCtx, "docker", "exec", containerID, "bash", "-lc", command)
+	args := []string{"exec"}
+	for key, value := range envVars {
+		k := strings.TrimSpace(key)
+		if k == "" {
+			continue
+		}
+		args = append(args, "-e", k+"="+value)
+	}
+	args = append(args, containerID, "bash", "-lc", command)
+	cmd := exec.CommandContext(execCtx, "docker", args...)
 	out, err := cmd.CombinedOutput()
 	exitCode := 0
 	if err != nil {

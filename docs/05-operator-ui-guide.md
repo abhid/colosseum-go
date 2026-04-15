@@ -7,8 +7,8 @@ This guide focuses on real operator workflows in the current UI.
 - **Runs**: create runs and monitor recent status
 - **Run Detail**: full execution surface (timeline, transcript, debug, events)
 - **Agents**: reusable profiles for provider/model/system prompt/tools
-- **Tools**: built-in/custom tool management + test runner
-- **Ecosystem**: workflows, policies, secrets, provider configs
+- **Tools**: built-in tool inventory and status
+- **Environments**, **Credential Vaults**, **Policies**: runtime resource management
 - **Approvals**: policy-gated runs requiring human action
 - **Settings**: provider and environment visibility
 

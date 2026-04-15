@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -121,9 +122,9 @@ func (m *Manager) processOne(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	var runID, agentID, task, workspace, providerName, model string
+	var runID, agentID, task, workspace, providerName, model, environmentID, vaultID string
 	var maxSteps int
-	err := m.DB.QueryRowContext(ctx, `SELECT id,agent_id,task,workspace_path,provider,model,max_steps FROM runs WHERE status='queued' ORDER BY created_at ASC LIMIT 1`).Scan(&runID, &agentID, &task, &workspace, &providerName, &model, &maxSteps)
+	err := m.DB.QueryRowContext(ctx, `SELECT id,agent_id,task,workspace_path,provider,model,max_steps,environment_id,credential_vault_id FROM runs WHERE status='queued' ORDER BY created_at ASC LIMIT 1`).Scan(&runID, &agentID, &task, &workspace, &providerName, &model, &maxSteps, &environmentID, &vaultID)
 	if err == sql.ErrNoRows {
 		return
 	}
@@ -138,13 +139,13 @@ func (m *Manager) processOne(ctx context.Context) {
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		if err := m.run(ctx, runID, agentID, task, workspace, providerName, model, maxSteps); err != nil && ctx.Err() == nil {
+		if err := m.run(ctx, runID, agentID, task, workspace, providerName, model, maxSteps, environmentID, vaultID); err != nil && ctx.Err() == nil {
 			log.Printf("run %s failed: %v", runID, err)
 		}
 	}()
 }
 
-func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, providerName, model string, maxSteps int) error {
+func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, providerName, model string, maxSteps int, environmentID, vaultID string) error {
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -159,7 +160,15 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 	var allowedTools []string
 	_ = json.Unmarshal([]byte(allowedToolsJSON), &allowedTools)
 	systemPrompt = buildEffectiveSystemPrompt(systemPrompt, allowedTools)
-	if err := m.Store.AppendEvent(ctx, runID, "", "run.started", map[string]any{"provider": providerName, "model": model}); err != nil {
+	resources, err := m.loadSessionResources(ctx, runID, environmentID, vaultID)
+	if err != nil {
+		return m.failRun(ctx, runID, err)
+	}
+	if err := m.Store.AppendEvent(ctx, runID, "", "run.started", map[string]any{
+		"provider": providerName, "model": model,
+		"environment_id": resources.EnvironmentID, "environment_name": resources.EnvironmentName,
+		"credential_vault_id": resources.VaultID, "injected_env_count": len(resources.EnvVars),
+	}); err != nil {
 		return m.failRun(ctx, runID, err)
 	}
 
@@ -258,7 +267,11 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 			_, _ = m.DB.ExecContext(ctx, `INSERT INTO tool_calls(id,run_id,step_id,tool_name,input_json,status,started_at) VALUES(?,?,?,?,?,?,?)`, toolCallID, runID, stepID, tc.Name, string(tc.Arguments), "running", now())
 			toolSpanID := uuid.NewString()
 			_, _ = m.DB.ExecContext(ctx, `INSERT INTO trace_spans(id,run_id,parent_id,name,kind,status,started_at,attrs_json) VALUES(?,?,?,?,?,?,?,?)`, toolSpanID, runID, modelSpanID, "tool."+tc.Name, "tool", "running", now(), `{"step_id":"`+stepID+`","tool_call_id":"`+toolCallID+`"}`)
-			result, execErr := m.Tools.Execute(ctx, tools.Context{RunID: runID, StepID: stepID, Workspace: workspace}, tc.Name, tc.Arguments)
+			result, execErr := m.Tools.Execute(ctx, tools.Context{
+				RunID: runID, StepID: stepID, Workspace: workspace,
+				EnvironmentID: resources.EnvironmentID, CredentialVaultID: resources.VaultID,
+				EnvVars: resources.EnvVars,
+			}, tc.Name, tc.Arguments)
 			outputJSON, _ := json.Marshal(result.Output)
 			status := "completed"
 			errClass := ""
@@ -493,6 +506,98 @@ func buildEffectiveSystemPrompt(base string, allowedTools []string) string {
 		return policyBlock
 	}
 	return base + "\n\n" + policyBlock
+}
+
+type sessionResources struct {
+	EnvironmentID   string
+	EnvironmentName string
+	VaultID         string
+	EnvVars         map[string]string
+}
+
+func (m *Manager) loadSessionResources(ctx context.Context, runID, environmentID, vaultID string) (sessionResources, error) {
+	res := sessionResources{
+		EnvironmentID: strings.TrimSpace(environmentID),
+		VaultID:       strings.TrimSpace(vaultID),
+		EnvVars:       map[string]string{},
+	}
+	res.EnvVars["COLOSSEUM_SESSION_ID"] = runID
+	if res.EnvironmentID != "" {
+		var name, configJSON string
+		if err := m.DB.QueryRowContext(ctx, `SELECT name, config_json FROM environments WHERE id=?`, res.EnvironmentID).Scan(&name, &configJSON); err != nil {
+			if err == sql.ErrNoRows {
+				return res, fmt.Errorf("environment not found: %s", res.EnvironmentID)
+			}
+			return res, fmt.Errorf("load environment: %w", err)
+		}
+		res.EnvironmentName = name
+		var cfg map[string]any
+		if err := json.Unmarshal([]byte(configJSON), &cfg); err == nil {
+			for k, v := range parseEnvironmentVars(cfg) {
+				res.EnvVars[k] = v
+			}
+		}
+	}
+	if res.VaultID != "" {
+		rows, err := m.DB.QueryContext(ctx, `
+			SELECT i.secret_name, i.alias, s.cipher_text
+			FROM credential_vault_items i
+			JOIN secrets s ON s.name=i.secret_name
+			WHERE i.vault_id=?
+		`, res.VaultID)
+		if err != nil {
+			return res, fmt.Errorf("load vault secrets: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var secretName, alias, cipher string
+			if err := rows.Scan(&secretName, &alias, &cipher); err != nil {
+				return res, fmt.Errorf("scan vault secret: %w", err)
+			}
+			value := redactedDecrypt(cipher)
+			envName := strings.TrimSpace(alias)
+			if envName == "" {
+				envName = strings.TrimSpace(secretName)
+			}
+			if envName != "" {
+				res.EnvVars[envName] = value
+			}
+		}
+	}
+	return res, nil
+}
+
+func parseEnvironmentVars(cfg map[string]any) map[string]string {
+	out := map[string]string{}
+	if cfg == nil {
+		return out
+	}
+	raw := cfg["env_vars"]
+	envObj, ok := raw.(map[string]any)
+	if !ok {
+		return out
+	}
+	for k, v := range envObj {
+		key := strings.TrimSpace(k)
+		if key == "" {
+			continue
+		}
+		out[key] = strings.TrimSpace(fmt.Sprint(v))
+	}
+	return out
+}
+
+func redactedDecrypt(cipher string) string {
+	raw, err := hex.DecodeString(strings.TrimSpace(cipher))
+	if err != nil {
+		return ""
+	}
+	key := byte(0x5A)
+	decoded := make([]byte, len(raw))
+	for i := range raw {
+		decoded[i] = raw[i] ^ key
+	}
+	return string(decoded)
 }
 
 func hasAllowedTool(allowedTools []string, name string) bool {

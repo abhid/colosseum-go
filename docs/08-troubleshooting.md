@@ -11,7 +11,7 @@ Symptom:
 Fix:
 
 ```bash
-./bin/colosseum server --listen-ip 127.0.0.1 --port 8090
+./bin/colosseum server --port 8090
 ```
 
 or set `--bind`.
@@ -43,7 +43,7 @@ Fix:
 ```bash
 make build
 # restart running server process
-./bin/colosseum server --listen-ip 127.0.0.1 --port 8080
+./bin/colosseum server --port 8080
 ```
 
 ## Browser Tool Errors

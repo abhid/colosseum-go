@@ -26,7 +26,7 @@ This produces `bin/colosseum` with embedded UI assets.
 ```bash
 OPENAI_API_KEY=... \
 ANTHROPIC_API_KEY=... \
-./bin/colosseum server --listen-ip 127.0.0.1 --port 8080
+./bin/colosseum server --port 8080
 ```
 
 Open:
@@ -34,6 +34,11 @@ Open:
 - UI: `http://127.0.0.1:8080`
 - Health check: `http://127.0.0.1:8080/healthz`
 - Readiness check: `http://127.0.0.1:8080/readyz`
+
+Notes:
+
+- Default listen IP is `0.0.0.0` (all interfaces).
+- Environment variables can come from shell exports or `.env` / `.env.local`.
 
 ## First End-to-End Run
 

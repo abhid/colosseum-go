@@ -22,7 +22,7 @@ flowchart LR
 
 ### API Layer (`internal/api`)
 
-- CRUD + operational routes for agents, runs, tools, ecosystem resources, and evals
+- CRUD + operational routes for agents, runs, tools, and ecosystem resources
 - SSE stream for live run updates (`/api/stream/runs/{id}`)
 - telemetry endpoints used by transcript/debug/event views
 - prompt enhancement endpoints
@@ -42,8 +42,8 @@ SQLite is the source of truth for control-plane state:
 
 - execution: `runs`, `run_steps`, `tool_calls`, `events`, `trace_spans`
 - governance: `approvals`, `policies`, `tool_defs`, `provider_configs`
-- ecosystem: `workflow_defs`, `workflow_runs`, `secrets`, `eval_*`
-- outputs: `artifacts`, `containers`, `evaluations`
+- ecosystem: `secrets`, `environments`, `credential_vaults`, `policies`
+- outputs: `artifacts`, `containers`
 
 Artifacts are written to disk and indexed in DB.
 

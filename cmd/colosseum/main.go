@@ -15,10 +15,10 @@ import (
 	"github.com/adevireddy/colosseum/internal/config"
 	"github.com/adevireddy/colosseum/internal/db"
 	"github.com/adevireddy/colosseum/internal/docker"
-	"github.com/adevireddy/colosseum/internal/evals"
 	"github.com/adevireddy/colosseum/internal/providers"
 	"github.com/adevireddy/colosseum/internal/runtime"
 	"github.com/adevireddy/colosseum/internal/tools"
+	"github.com/joho/godotenv"
 )
 
 func main() {
@@ -37,6 +37,9 @@ func main() {
 }
 
 func runServer() {
+	// Load optional .env files for local development without overriding shell env.
+	_ = godotenv.Load(".env.local", ".env")
+
 	cfg := config.Load(os.Args[2:])
 
 	database, err := db.Open(cfg.DBPath)
@@ -86,11 +89,9 @@ func runServer() {
 		Fallback: cfg.BrowserFallback,
 	}
 	runtimeMgr := runtime.NewManager(database, providerMap, toolExec)
-	evalMgr := evals.NewManager(database, cfg.WorkspaceRoot)
 	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
 	defer runtimeCancel()
 	go runtimeMgr.Start(runtimeCtx)
-	go evalMgr.Start(runtimeCtx)
 
 	srv := api.NewServer(database, cfg.WorkspaceRoot, availableProviders, cfg.OpenAIKey, providerMap)
 	httpServer := &http.Server{
@@ -129,11 +130,6 @@ func runServer() {
 	go func() {
 		defer wg.Done()
 		runtimeMgr.Wait()
-	}()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		evalMgr.Wait()
 	}()
 
 	waitDone := make(chan struct{})

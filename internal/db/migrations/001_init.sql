@@ -141,12 +141,3 @@ CREATE TABLE IF NOT EXISTS provider_configs (
   updated_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS evaluations (
-  id TEXT PRIMARY KEY,
-  run_id TEXT NOT NULL,
-  metric TEXT NOT NULL,
-  value REAL NOT NULL,
-  notes TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL,
-  FOREIGN KEY(run_id) REFERENCES runs(id)
-);

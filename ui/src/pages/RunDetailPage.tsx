@@ -76,18 +76,21 @@ export function RunDetailPage() {
   const [expandedRowID, setExpandedRowID] = useState('')
   const [expandedEventRowID, setExpandedEventRowID] = useState('')
   const [isArtifactsModalOpen, setIsArtifactsModalOpen] = useState(false)
+  const [hoveredTimelineSpanID, setHoveredTimelineSpanID] = useState('')
   const activeActors: ActorLaneId[] = ['orchestrator', 'tools', 'system', 'user']
 
   const steer = useMutation({ mutationFn: () => api.steerRun(id, { message: steerText }), onSuccess: () => setSteerText('') })
 
   const runQ = useQuery({ queryKey: ['run', id], queryFn: () => api.getRun(id), enabled: Boolean(id), refetchInterval: 1800 })
   const agentQ = useQuery({ queryKey: ['agent', runQ.data?.agent_id], queryFn: () => api.listAgents().then(agents => agents.find(a => a.id === runQ.data?.agent_id)), enabled: Boolean(runQ.data?.agent_id) })
+  const environmentsQ = useQuery({ queryKey: ['environments'], queryFn: api.listEnvironments })
+  const vaultsQ = useQuery({ queryKey: ['credential-vaults'], queryFn: api.listCredentialVaults })
   const telemetryQ = useQuery({ queryKey: ['telemetry', id], queryFn: () => api.getRunTelemetry(id), enabled: Boolean(id), refetchInterval: 1800 })
   const artifactsQ = useQuery({ queryKey: ['artifacts', id], queryFn: () => api.getRunArtifacts(id), enabled: Boolean(id), refetchInterval: 2500 })
 
   useEffect(() => {
     if (!id) return
-    const es = new EventSource(`/api/stream/runs/${id}`)
+    const es = new EventSource(`/api/stream/sessions/${id}`)
     es.addEventListener('run_event', () => {
       qc.invalidateQueries({ queryKey: ['telemetry', id] })
       qc.invalidateQueries({ queryKey: ['run', id] })
@@ -199,6 +202,38 @@ export function RunDetailPage() {
 
     return { min, max, total, spans }
   }, [spans])
+  const timelineMeta = useMemo(() => {
+    if (!timeline) return null
+    let orchestrator = 0
+    let tools = 0
+    let system = 0
+    let user = 0
+    for (const span of timeline.spans) {
+      if (span.__actor === 'orchestrator') orchestrator++
+      else if (span.__actor === 'tools') tools++
+      else if (span.__actor === 'system') system++
+      else if (span.__actor === 'user') user++
+    }
+    return {
+      orchestrator,
+      tools,
+      system,
+      user,
+      totalSpans: timeline.spans.length,
+      windowLabel: `${formatDuration(timeline.total)} window`,
+    }
+  }, [timeline])
+  const hoveredTimelineSpan = useMemo(() => {
+    if (!timeline || !hoveredTimelineSpanID) return null
+    const span = timeline.spans.find((s) => s.id === hoveredTimelineSpanID)
+    if (!span) return null
+    const spanMs = Math.max(0, (span.__end || span.__start) - span.__start)
+    return {
+      name: span.name,
+      actor: span.__actor,
+      durationLabel: formatDuration(spanMs),
+    }
+  }, [timeline, hoveredTimelineSpanID])
 
   const metrics = useMemo(() => {
     const run = runQ.data
@@ -237,6 +272,18 @@ export function RunDetailPage() {
     const first = parseTimeMs(eventRows[0].created_at)
     return Number.isFinite(first) ? first : NaN
   }, [runQ.data?.started_at, runQ.data?.created_at, eventRows])
+  const environmentLabel = useMemo(() => {
+    const environmentID = runQ.data?.environment_id || ''
+    if (!environmentID) return 'default'
+    const match = (environmentsQ.data ?? []).find((env) => String(env.id) === environmentID)
+    return String(match?.name || environmentID)
+  }, [runQ.data?.environment_id, environmentsQ.data])
+  const vaultLabel = useMemo(() => {
+    const vaultID = runQ.data?.credential_vault_id || ''
+    if (!vaultID) return 'none'
+    const match = (vaultsQ.data ?? []).find((vault) => String(vault.id) === vaultID)
+    return String(match?.name || vaultID)
+  }, [runQ.data?.credential_vault_id, vaultsQ.data])
 
   if (!id) return null
 
@@ -246,41 +293,43 @@ export function RunDetailPage() {
   return (
     <div className="flex flex-col h-[100vh] bg-[#fafafa] text-sm -mt-5 -mx-6 -mb-5 rounded-tl-xl overflow-hidden shadow-sm border-l border-t border-gray-200">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 bg-white">
-        <div>
-          <div className="flex items-center gap-2 text-gray-500 text-sm mb-1.5 cursor-pointer">
-            <span className="hover:text-gray-700 transition-colors">Runs</span>
+      <div className="border-b border-gray-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="mb-1.5 flex items-center gap-2 text-sm text-gray-500">
+            <span className="hover:text-gray-700 transition-colors">Sessions</span>
             <span className="text-gray-300">/</span>
-            <span className="hover:text-gray-700 transition-colors flex items-center gap-1 font-medium text-gray-600">
+            <span className="truncate font-medium text-gray-600 hover:text-gray-700 transition-colors">
               {id}
             </span>
           </div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-semibold text-gray-900 tracking-tight">{taskTitle}</h1>
-            <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-[11px] font-medium border border-gray-200 shadow-sm capitalize">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="min-w-0 flex-1 text-lg font-semibold tracking-tight text-gray-900 sm:text-xl">
+                {taskTitle}
+              </h1>
+              <span className="shrink-0 rounded border border-gray-200 bg-gray-100 px-2 py-0.5 text-[11px] font-medium capitalize text-gray-600 shadow-sm">
               {statusLabel}
-            </span>
+              </span>
+            </div>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
             <input 
               type="text" 
               value={steerText}
               onChange={(e) => setSteerText(e.target.value)}
               placeholder="Message agent..." 
-              className="h-9 px-3 rounded-md border border-gray-300 text-sm w-64 focus:outline-none focus:ring-1 focus:ring-gray-400 focus:border-gray-400 bg-white shadow-sm"
+              className="h-9 min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 text-sm shadow-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 lg:w-80 lg:flex-none"
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && steerText) {
                   steer.mutate()
                 }
               }}
             />
-          </div>
-          <button className="flex items-center gap-1 border border-gray-200 bg-white hover:bg-gray-50 px-3 py-1.5 rounded-md text-sm font-medium text-gray-700 shadow-sm transition-colors">
+            <button className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50">
             Actions
             <IconChevronDown size={16} className="text-gray-400" />
-          </button>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -290,7 +339,7 @@ export function RunDetailPage() {
           <IconGitBranch size={14} className="text-gray-400" /> {agentQ.data?.name || runQ.data?.agent_id || 'default-agent'}
         </div>
         <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-gray-200 bg-white shadow-sm font-medium">
-          <IconCloud size={14} className="text-gray-400" /> env
+          <IconCloud size={14} className="text-gray-400" /> {environmentLabel}
         </div>
         <button 
           onClick={() => setIsArtifactsModalOpen(true)}
@@ -299,7 +348,7 @@ export function RunDetailPage() {
           <IconFile size={14} className="text-gray-400" /> {displayArtifacts.length} {displayArtifacts.length === 1 ? 'file' : 'files'}
         </button>
         <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-gray-200 bg-white shadow-sm font-medium text-gray-500">
-          <IconLock size={14} className="text-gray-400" /> production-vault
+          <IconLock size={14} className="text-gray-400" /> {vaultLabel}
         </div>
         
         <div className="flex items-center gap-1.5 text-gray-500 ml-4 font-medium">
@@ -351,21 +400,60 @@ export function RunDetailPage() {
           {activeTab === 'transcript' ? (
             <>
               {/* Timeline Component */}
-              <div className="mb-8 p-3 bg-white rounded-lg border border-gray-200 shadow-sm flex items-center">
-                <div className="w-full h-10 bg-gray-50 rounded border border-gray-200 relative overflow-hidden flex items-center">
-                  {timeline && timeline.spans.map(span => {
+              <div className="mb-8 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+                      {timelineMeta?.totalSpans ?? 0} spans
+                    </span>
+                    <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+                      {timelineMeta?.windowLabel ?? '0s window'}
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px]">
+                      <span className="h-2 w-2 rounded bg-[#60A5FA]" />
+                      Orchestrator {timelineMeta?.orchestrator ?? 0}
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px]">
+                      <span className="h-2 w-2 rounded bg-[#F472B6]" />
+                      Tools {timelineMeta?.tools ?? 0}
+                    </span>
+                    {(timelineMeta?.system ?? 0) > 0 ? (
+                      <span className="inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px]">
+                        <span className="h-2 w-2 rounded bg-gray-300" />
+                        System {timelineMeta?.system ?? 0}
+                      </span>
+                    ) : null}
+                  </div>
+                  <span className="text-[11px] text-gray-400">
+                    {hoveredTimelineSpan
+                      ? `${hoveredTimelineSpan.name} • ${hoveredTimelineSpan.durationLabel} • ${hoveredTimelineSpan.actor}`
+                      : 'hover spans for details'}
+                  </span>
+                </div>
+                <div className="w-full h-10 rounded border border-gray-200 relative overflow-hidden flex items-center bg-white">
+                  {timeline && timeline.spans.map((span) => {
                     const start = ((span.__start - timeline.min) / timeline.total) * 100
-                    const width = Math.max(0.5, (((span.__end || span.__start) - span.__start) / timeline.total) * 100)
+                    const spanMs = Math.max(0, (span.__end || span.__start) - span.__start)
+                    const width = Math.max(0.5, (spanMs / timeline.total) * 100)
                     const bg = span.__actor === 'tools' ? 'bg-[#F472B6]' : span.__actor === 'orchestrator' ? 'bg-[#60A5FA]' : 'bg-gray-300'
                     return (
                       <div
                         key={span.id}
                         className={`absolute h-6 rounded-[3px] opacity-80 hover:opacity-100 transition-opacity cursor-pointer shadow-sm ${bg}`}
                         style={{ left: `${start}%`, width: `${width}%` }}
-                        title={span.name}
+                        title={`${span.name} • ${formatDuration(spanMs)} • ${span.__actor}`}
+                        tabIndex={0}
+                        onMouseEnter={() => setHoveredTimelineSpanID(span.id)}
+                        onMouseLeave={() => setHoveredTimelineSpanID((prev) => (prev === span.id ? '' : prev))}
+                        onFocus={() => setHoveredTimelineSpanID(span.id)}
+                        onBlur={() => setHoveredTimelineSpanID((prev) => (prev === span.id ? '' : prev))}
                       />
                     )
                   })}
+                </div>
+                <div className="mt-1.5 flex items-center justify-between text-[11px] text-gray-400">
+                  <span>0s</span>
+                  <span>{timelineMeta?.windowLabel ?? '0s window'}</span>
                 </div>
               </div>
 
@@ -432,15 +520,15 @@ export function RunDetailPage() {
           {activeTab === 'debug' ? (
              <div className="space-y-6">
                 <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
-                  <h3 className="text-sm font-semibold tracking-tight text-gray-900 mb-4">Run Details</h3>
+                  <h3 className="text-sm font-semibold tracking-tight text-gray-900 mb-4">Session Details</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                     <div>
                       <p className="text-xs text-gray-500 mb-1.5">Agent ID</p>
                       <p className="font-mono text-xs text-gray-900 bg-gray-50 p-2 rounded border border-gray-200">{runQ.data?.agent_id || '-'}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-500 mb-1.5">Provider:Model</p>
-                      <p className="font-mono text-xs text-gray-900 bg-gray-50 p-2 rounded border border-gray-200">{runQ.data?.provider || '-'}:{runQ.data?.model || '-'}</p>
+                      <p className="text-xs text-gray-500 mb-1.5">Provider/Model</p>
+                      <p className="font-mono text-xs text-gray-900 bg-gray-50 p-2 rounded border border-gray-200">{runQ.data?.provider || '-'}/{runQ.data?.model || '-'}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 mb-1.5">Workspace</p>
@@ -454,7 +542,7 @@ export function RunDetailPage() {
                   <details className="text-xs group">
                     <summary className="cursor-pointer text-gray-600 hover:text-gray-900 font-medium inline-flex items-center gap-1 transition-colors">
                       <IconChevronDown size={14} className="group-open:-rotate-180 transition-transform" />
-                      View Raw Run Object
+                      View Raw Session Object
                     </summary>
                     <pre className="max-h-64 overflow-auto rounded-lg bg-gray-900 p-4 font-mono text-[11px] text-gray-100 mt-3 shadow-inner">{JSON.stringify(runQ.data, null, 2)}</pre>
                   </details>
@@ -604,7 +692,7 @@ export function RunDetailPage() {
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 bg-gray-50/80">
               <div className="flex items-center gap-2">
                 <IconFile size={18} className="text-gray-500" />
-                <h2 className="text-lg font-semibold text-gray-900">Run Artifacts <span className="text-gray-500 font-normal text-sm ml-1">({displayArtifacts.length})</span></h2>
+                <h2 className="text-lg font-semibold text-gray-900">Session Artifacts <span className="text-gray-500 font-normal text-sm ml-1">({displayArtifacts.length})</span></h2>
               </div>
               <button 
                 onClick={() => setIsArtifactsModalOpen(false)} 
@@ -618,7 +706,7 @@ export function RunDetailPage() {
                 <div className="text-center text-gray-500 py-12 flex flex-col items-center justify-center">
                   <IconFile size={48} className="text-gray-300 mb-4" />
                   <p className="text-base font-medium text-gray-900 mb-1">No artifacts found</p>
-                  <p className="text-sm">This run hasn't generated any files or logs yet.</p>
+                  <p className="text-sm">This session hasn't generated any files or logs yet.</p>
                 </div>
               ) : (
                 <div className="grid gap-4 md:grid-cols-2">
@@ -675,16 +763,16 @@ function summarizeEvent(row: EventRow) {
   }
 
   if (row.event_type === 'run.completed') {
-    return snippet ? `Final result generated` : 'Run completed'
+    return snippet ? `Final result generated` : 'Session completed'
   }
   if (row.event_type === 'run.started') {
     const provider = typeof parsed.provider === 'string' ? parsed.provider : ''
     const model = typeof parsed.model === 'string' ? parsed.model : ''
     if (provider || model) return `Using ${provider}${provider && model ? ' ' : ''}${model}`.trim()
-    return 'Run started'
+    return 'Session started'
   }
   if (row.event_type === 'run.created') {
-    return 'Run queued'
+    return 'Session queued'
   }
 
   if (typeof parsed.reason === 'string' && parsed.reason.trim()) return parsed.reason.trim()
@@ -700,13 +788,13 @@ function transcriptLine(row: EventRow) {
   const readable = summarizeEvent(row)
   switch (row.event_type) {
     case 'run.created':
-      return { title: 'Session queued', subtitle: readable || 'Run is queued and waiting for execution.' }
+      return { title: 'Session queued', subtitle: readable || 'Session is queued and waiting for execution.' }
     case 'run.started':
       return { title: 'Session started', subtitle: readable || 'Agent runtime has started.' }
     case 'run.completed':
-      return { title: 'Session completed', subtitle: readable || 'Run completed successfully.' }
+      return { title: 'Session completed', subtitle: readable || 'Session completed successfully.' }
     case 'run.failed':
-      return { title: 'Session failed', subtitle: readable || 'Run ended with an error.' }
+      return { title: 'Session failed', subtitle: readable || 'Session ended with an error.' }
     case 'model.response':
       return { title: 'Agent response', subtitle: readable || 'Model generated a response.' }
     case 'tool.result':
@@ -714,7 +802,7 @@ function transcriptLine(row: EventRow) {
     case 'approval.requested':
       return { title: 'Approval requested', subtitle: readable || 'Operator approval is required.' }
     case 'approval.approved':
-      return { title: 'Approval granted', subtitle: readable || 'Operator approved and run resumed.' }
+      return { title: 'Approval granted', subtitle: readable || 'Operator approved and session resumed.' }
     default:
       return { title: humanizeEventType(row.event_type), subtitle: readable || 'Event recorded.' }
   }

@@ -1,12 +1,13 @@
 # Configuration
 
-`colosseum` reads configuration from CLI flags and environment variables.
+`colosseum` reads configuration from CLI flags, environment variables, and optional `.env` files.
 
 Precedence:
 
 1. CLI flags
-2. environment variables
-3. built-in defaults
+2. shell environment variables
+3. `.env.local`, then `.env`
+4. built-in defaults
 
 ## CLI Flags
 
@@ -23,7 +24,7 @@ Precedence:
 ### Server Core
 
 - `COLOSSEUM_BIND`
-- `COLOSSEUM_LISTEN_IP`
+- `COLOSSEUM_LISTEN_IP` (default: `0.0.0.0`)
 - `COLOSSEUM_PORT`
 - `COLOSSEUM_DB_PATH` (default: `./colosseum.db`)
 - `COLOSSEUM_ARTIFACT_PATH` (default: `./artifacts`)
@@ -52,7 +53,6 @@ Provider visibility in UI is dynamic: providers are shown only when correspondin
 OPENAI_API_KEY=... \
 ANTHROPIC_API_KEY=... \
 ./bin/colosseum server \
-  --listen-ip 127.0.0.1 \
   --port 8080 \
   --db ./colosseum.db \
   --artifacts ./artifacts \

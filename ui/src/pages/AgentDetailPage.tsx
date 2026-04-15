@@ -35,11 +35,16 @@ export function AgentDetailPage() {
     model: '',
     system_prompt: '',
     allowed_tools: [] as string[],
+    starter_prompts_text: '',
+    default_task: '',
+    default_max_steps: 30,
+    default_workspace_path: '',
   })
   const [providerModelInput, setProviderModelInput] = useState('')
   const [deleteError, setDeleteError] = useState('')
   const [activePanel, setActivePanel] = useState<'config' | 'source' | 'preview'>('source')
   const [coachText, setCoachText] = useState('')
+  const [launchTask, setLaunchTask] = useState('')
 
   useEffect(() => {
     if (!agent) return
@@ -50,8 +55,13 @@ export function AgentDetailPage() {
       model: agent.model,
       system_prompt: agent.system_prompt,
       allowed_tools: agent.allowed_tools ?? [],
+      starter_prompts_text: starterPromptsToText(agent.starter_prompts ?? []),
+      default_task: agent.default_task ?? '',
+      default_max_steps: agent.default_max_steps ?? 30,
+      default_workspace_path: agent.default_workspace_path ?? '',
     })
     setProviderModelInput(formatProviderModel(agent.provider, agent.model))
+    setLaunchTask(agent.default_task || (agent.starter_prompts ?? [])[0] || '')
   }, [agent])
 
   useEffect(() => {
@@ -71,12 +81,34 @@ export function AgentDetailPage() {
     }
     return Array.from(new Set(out))
   }, [providerIDs, openAIModels])
-
   const updateAgent = useMutation({
-    mutationFn: () => api.updateAgent(id, form),
+    mutationFn: () =>
+      api.updateAgent(id, {
+        name: form.name,
+        description: form.description,
+        provider: form.provider,
+        model: form.model,
+        system_prompt: form.system_prompt,
+        allowed_tools: form.allowed_tools,
+        starter_prompts: parseStarterPrompts(form.starter_prompts_text),
+        default_task: form.default_task,
+        default_max_steps: form.default_max_steps,
+        default_workspace_path: form.default_workspace_path,
+      }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['agents'] })
     },
+  })
+
+  const createRun = useMutation({
+    mutationFn: () =>
+      api.createRun({
+        agent_id: id,
+        task: launchTask || form.default_task,
+        max_steps: form.default_max_steps,
+        workspace_path: form.default_workspace_path,
+      }),
+    onSuccess: (out) => navigate(`/sessions/${out.id}`),
   })
 
   const enhancePrompt = useMutation({
@@ -95,11 +127,17 @@ export function AgentDetailPage() {
   const generatedPayload = useMemo(
     () => ({
       name: form.name || 'unnamed-agent',
-      model: `${form.provider || 'provider'}:${form.model || 'model'}`,
+      model: `${form.provider || 'provider'}/${form.model || 'model'}`,
       tools: form.allowed_tools.map((tool) => ({ type: tool })),
       system: form.system_prompt || '',
+      starter_prompts: parseStarterPrompts(form.starter_prompts_text),
+      defaults: {
+        task: form.default_task || '',
+        max_steps: form.default_max_steps || 30,
+        workspace_path: form.default_workspace_path || '',
+      },
     }),
-    [form.name, form.provider, form.model, form.allowed_tools, form.system_prompt],
+    [form.name, form.provider, form.model, form.allowed_tools, form.system_prompt, form.starter_prompts_text, form.default_task, form.default_max_steps, form.default_workspace_path],
   )
 
   const yamlPreview = useMemo(() => payloadToYaml(generatedPayload), [generatedPayload])
@@ -192,6 +230,38 @@ export function AgentDetailPage() {
             </button>
           </div>
 
+          <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Start session</p>
+            <textarea
+              className="h-24 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
+              placeholder="Session task"
+              value={launchTask}
+              onChange={(e) => setLaunchTask(e.target.value)}
+            />
+            {(parseStarterPrompts(form.starter_prompts_text)).length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {parseStarterPrompts(form.starter_prompts_text).slice(0, 5).map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-[11px] text-gray-600 transition-colors hover:bg-gray-100"
+                    onClick={() => setLaunchTask(prompt)}
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className="mt-3 h-8 rounded-md bg-gray-900 px-3 text-xs font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
+              onClick={() => createRun.mutate()}
+              disabled={createRun.isPending || !(launchTask || form.default_task).trim()}
+            >
+              {createRun.isPending ? 'Starting...' : 'Start Session'}
+            </button>
+          </div>
+
           {deleteError ? (
             <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{deleteError}</p>
           ) : null}
@@ -272,6 +342,34 @@ export function AgentDetailPage() {
                 selected={form.allowed_tools}
                 onChange={(next) => setForm((f) => ({ ...f, allowed_tools: next }))}
               />
+              <textarea
+                className="h-20 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                value={form.starter_prompts_text}
+                onChange={(e) => setForm((f) => ({ ...f, starter_prompts_text: e.target.value }))}
+                placeholder="Starter prompts (one per line)"
+              />
+              <textarea
+                className="h-24 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                value={form.default_task}
+                onChange={(e) => setForm((f) => ({ ...f, default_task: e.target.value }))}
+                placeholder="Default session task (used when task is blank)"
+              />
+              <div className="grid gap-3 md:grid-cols-2">
+                <input
+                  type="number"
+                  min={1}
+                  className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                  value={form.default_max_steps}
+                  onChange={(e) => setForm((f) => ({ ...f, default_max_steps: Number(e.target.value || 30) }))}
+                  placeholder="Default max steps"
+                />
+                <input
+                  className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                  value={form.default_workspace_path}
+                  onChange={(e) => setForm((f) => ({ ...f, default_workspace_path: e.target.value }))}
+                  placeholder="Default workspace path (supports {{run_id}})"
+                />
+              </div>
             </div>
           ) : null}
 
@@ -279,7 +377,7 @@ export function AgentDetailPage() {
             <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
               <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
                 <span>yaml</span>
-                <span>{form.provider}:{form.model}</span>
+                <span>{form.provider}/{form.model}</span>
               </div>
               <pre className="max-h-[620px] overflow-auto rounded bg-gray-900 p-4 font-mono text-[12px] leading-relaxed text-gray-100">{yamlPreview}</pre>
             </div>
@@ -319,9 +417,9 @@ export function AgentDetailPage() {
                   await deleteAgent.mutateAsync(false)
                 } catch (err) {
                   const message = err instanceof Error ? err.message : 'Failed to delete agent'
-                  if (message.includes('agent has runs')) {
+                  if (message.includes('agent has runs') || message.includes('agent has sessions')) {
                     const force = window.confirm(
-                      `Agent "${form.name}" has runs.\n\nForce delete will permanently remove all runs and run history for this agent.\n\nContinue?`,
+                      `Agent "${form.name}" has sessions.\n\nForce delete will permanently remove all session history for this agent.\n\nContinue?`,
                     )
                     if (!force) {
                       setDeleteError(message)
@@ -467,6 +565,21 @@ function parseProviderModelInput(value: string, providerIDs: string[], fallbackP
     providerIDs.find((p) => providerDisplayName(p).toLowerCase() === providerPart) ||
     fallback
   return { provider: matchedProvider, model: modelPart }
+}
+
+function parseStarterPrompts(value: string) {
+  return Array.from(
+    new Set(
+      value
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean),
+    ),
+  )
+}
+
+function starterPromptsToText(prompts: string[]) {
+  return prompts.join('\n')
 }
 
 function payloadToYaml(payload: { name: string; model: string; tools: Array<{ type: string }>; system: string }) {

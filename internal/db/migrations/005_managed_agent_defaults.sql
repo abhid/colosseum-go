@@ -1,0 +1,4 @@
+ALTER TABLE agents ADD COLUMN starter_prompts TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE agents ADD COLUMN default_task TEXT NOT NULL DEFAULT '';
+ALTER TABLE agents ADD COLUMN default_max_steps INTEGER NOT NULL DEFAULT 30;
+ALTER TABLE agents ADD COLUMN default_workspace_path TEXT NOT NULL DEFAULT '';

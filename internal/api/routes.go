@@ -22,12 +22,16 @@ import (
 )
 
 type createAgentRequest struct {
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	Provider     string   `json:"provider"`
-	Model        string   `json:"model"`
-	SystemPrompt string   `json:"system_prompt"`
-	AllowedTools []string `json:"allowed_tools"`
+	Name                 string   `json:"name"`
+	Description          string   `json:"description"`
+	Provider             string   `json:"provider"`
+	Model                string   `json:"model"`
+	SystemPrompt         string   `json:"system_prompt"`
+	AllowedTools         []string `json:"allowed_tools"`
+	StarterPrompts       []string `json:"starter_prompts"`
+	DefaultTask          string   `json:"default_task"`
+	DefaultMaxSteps      int      `json:"default_max_steps"`
+	DefaultWorkspacePath string   `json:"default_workspace_path"`
 }
 
 type createRunRequest struct {
@@ -40,6 +44,8 @@ type createRunRequest struct {
 	Provider            string `json:"provider"`
 	Model               string `json:"model"`
 	MaxSteps            int    `json:"max_steps"`
+	EnvironmentID       string `json:"environment_id"`
+	CredentialVaultID   string `json:"credential_vault_id"`
 }
 
 type toolUpsertRequest struct {
@@ -83,27 +89,31 @@ func registerAPIRoutes(
 		r.Get("/runs/{id}/telemetry", getRunTelemetryHandler(db))
 		r.Get("/runs/{id}/artifacts", getRunArtifactsHandler(db))
 		r.Get("/runs/{id}/artifacts/{artifactID}/content", getRunArtifactContentHandler(db))
+		r.Post("/runs/{id}/files", uploadRunFilesHandler(db))
 		r.Get("/runs/{id}/export", exportRunBundleHandler(db))
 		r.Post("/runs/{id}/cancel", updateRunStatusHandler(db, "cancelled"))
 		r.Post("/runs/{id}/approve", approveLatestHandler(db))
 		r.Post("/runs/{id}/interrupt", updateRunStatusHandler(db, "interrupted"))
 		r.Post("/runs/{id}/resume", updateRunStatusHandler(db, "queued"))
 		r.Post("/runs/{id}/events", appendRunEventHandler(db))
+		r.Post("/sessions", createRunHandler(db, workspaceRoot))
+		r.Get("/sessions", listRunsHandler(db))
+		r.Get("/sessions/{id}", getRunHandler(db))
+		r.Post("/sessions/{id}/replay", replayRunHandler(db, workspaceRoot))
+		r.Get("/sessions/{id}/trace", getRunTraceHandler(db))
+		r.Get("/sessions/{id}/telemetry", getRunTelemetryHandler(db))
+		r.Get("/sessions/{id}/artifacts", getRunArtifactsHandler(db))
+		r.Get("/sessions/{id}/artifacts/{artifactID}/content", getRunArtifactContentHandler(db))
+		r.Post("/sessions/{id}/files", uploadRunFilesHandler(db))
+		r.Get("/sessions/{id}/export", exportRunBundleHandler(db))
+		r.Post("/sessions/{id}/cancel", updateRunStatusHandler(db, "cancelled"))
+		r.Post("/sessions/{id}/approve", approveLatestHandler(db))
+		r.Post("/sessions/{id}/interrupt", updateRunStatusHandler(db, "interrupted"))
+		r.Post("/sessions/{id}/resume", updateRunStatusHandler(db, "queued"))
+		r.Post("/sessions/{id}/events", appendRunEventHandler(db))
 		r.Get("/providers", providersHandler(availableProviders))
 		r.Get("/providers/openai/models", openAIModelsHandler(openAIKey))
 		r.Post("/prompts/enhance", enhancePromptHandler(providerMap))
-		r.Get("/evals/suites", listEvalSuitesHandler(db))
-		r.Post("/evals/suites", createEvalSuiteHandler(db))
-		r.Get("/evals/suites/{id}", getEvalSuiteHandler(db))
-		r.Put("/evals/suites/{id}", updateEvalSuiteHandler(db))
-		r.Post("/evals/suites/{id}/runs", queueEvalRunHandler(db))
-		r.Get("/evals/suites/{id}/regression", getEvalRegressionHandler(db))
-		r.Get("/evals/runs", listEvalRunsHandler(db))
-		r.Get("/evals/runs/{id}", getEvalRunHandler(db))
-		r.Get("/workflows", listWorkflowsHandler(db))
-		r.Post("/workflows", createWorkflowHandler(db))
-		r.Put("/workflows/{id}", updateWorkflowHandler(db))
-		r.Delete("/workflows/{id}", deleteWorkflowHandler(db))
 		r.Get("/policies", listPoliciesHandler(db))
 		r.Post("/policies", createPolicyHandler(db))
 		r.Put("/policies/{id}", updatePolicyHandler(db))
@@ -115,7 +125,19 @@ func registerAPIRoutes(
 		r.Post("/provider-configs", createProviderConfigHandler(db))
 		r.Put("/provider-configs/{id}", updateProviderConfigHandler(db))
 		r.Delete("/provider-configs/{id}", deleteProviderConfigHandler(db))
+		r.Get("/environments", listEnvironmentsHandler(db))
+		r.Post("/environments", createEnvironmentHandler(db))
+		r.Put("/environments/{id}", updateEnvironmentHandler(db))
+		r.Delete("/environments/{id}", deleteEnvironmentHandler(db))
+		r.Get("/credential-vaults", listCredentialVaultsHandler(db))
+		r.Post("/credential-vaults", createCredentialVaultHandler(db))
+		r.Put("/credential-vaults/{id}", updateCredentialVaultHandler(db))
+		r.Delete("/credential-vaults/{id}", deleteCredentialVaultHandler(db))
+		r.Get("/credential-vaults/{id}/items", listCredentialVaultItemsHandler(db))
+		r.Post("/credential-vaults/{id}/items", upsertCredentialVaultItemHandler(db))
+		r.Delete("/credential-vaults/{id}/items/{secretName}", deleteCredentialVaultItemHandler(db))
 		r.Get("/stream/runs/{id}", streamRunEventsHandler(db))
+		r.Get("/stream/sessions/{id}", streamRunEventsHandler(db))
 	})
 }
 
@@ -259,13 +281,25 @@ func createAgentHandler(db *sql.DB) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name, provider, model required"})
 			return
 		}
+		if req.DefaultMaxSteps < 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "default_max_steps cannot be negative"})
+			return
+		}
+		if req.DefaultMaxSteps == 0 {
+			req.DefaultMaxSteps = 30
+		}
+		req.StarterPrompts = normalizeStarterPrompts(req.StarterPrompts)
 		id := uuid.NewString()
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		toolsJSON, _ := json.Marshal(req.AllowedTools)
+		starterPromptsJSON, _ := json.Marshal(req.StarterPrompts)
 		_, err := db.ExecContext(r.Context(), `
-			INSERT INTO agents(id,name,description,provider,model,system_prompt,allowed_tools,created_at,updated_at)
-			VALUES(?,?,?,?,?,?,?,?,?)
-		`, id, req.Name, req.Description, req.Provider, req.Model, req.SystemPrompt, string(toolsJSON), now, now)
+			INSERT INTO agents(
+				id,name,description,provider,model,system_prompt,allowed_tools,starter_prompts,
+				default_task,default_max_steps,default_workspace_path,created_at,updated_at
+			)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+		`, id, req.Name, req.Description, req.Provider, req.Model, req.SystemPrompt, string(toolsJSON), string(starterPromptsJSON), req.DefaultTask, req.DefaultMaxSteps, req.DefaultWorkspacePath, now, now)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -276,7 +310,11 @@ func createAgentHandler(db *sql.DB) http.HandlerFunc {
 
 func listAgentsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		rows, err := db.QueryContext(r.Context(), `SELECT id,name,description,provider,model,system_prompt,allowed_tools,created_at,updated_at FROM agents ORDER BY created_at DESC`)
+		rows, err := db.QueryContext(r.Context(), `
+			SELECT id,name,description,provider,model,system_prompt,allowed_tools,starter_prompts,default_task,default_max_steps,default_workspace_path,created_at,updated_at
+			FROM agents
+			ORDER BY created_at DESC
+		`)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -284,14 +322,17 @@ func listAgentsHandler(db *sql.DB) http.HandlerFunc {
 		defer rows.Close()
 		out := make([]map[string]any, 0)
 		for rows.Next() {
-			var id, name, desc, provider, model, prompt, tools, createdAt, updatedAt string
-			if err := rows.Scan(&id, &name, &desc, &provider, &model, &prompt, &tools, &createdAt, &updatedAt); err != nil {
+			var id, name, desc, provider, model, prompt, tools, starterPrompts, defaultTask, defaultWorkspacePath, createdAt, updatedAt string
+			var defaultMaxSteps int
+			if err := rows.Scan(&id, &name, &desc, &provider, &model, &prompt, &tools, &starterPrompts, &defaultTask, &defaultMaxSteps, &defaultWorkspacePath, &createdAt, &updatedAt); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
 			out = append(out, map[string]any{
 				"id": id, "name": name, "description": desc, "provider": provider, "model": model,
-				"system_prompt": prompt, "allowed_tools": json.RawMessage(tools), "created_at": createdAt, "updated_at": updatedAt,
+				"system_prompt": prompt, "allowed_tools": json.RawMessage(tools), "starter_prompts": json.RawMessage(starterPrompts),
+				"default_task": defaultTask, "default_max_steps": defaultMaxSteps, "default_workspace_path": defaultWorkspacePath,
+				"created_at": createdAt, "updated_at": updatedAt,
 			})
 		}
 		writeJSON(w, http.StatusOK, out)
@@ -310,13 +351,22 @@ func updateAgentHandler(db *sql.DB) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name, provider, model required"})
 			return
 		}
+		if req.DefaultMaxSteps < 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "default_max_steps cannot be negative"})
+			return
+		}
+		if req.DefaultMaxSteps == 0 {
+			req.DefaultMaxSteps = 30
+		}
+		req.StarterPrompts = normalizeStarterPrompts(req.StarterPrompts)
 		toolsJSON, _ := json.Marshal(req.AllowedTools)
+		starterPromptsJSON, _ := json.Marshal(req.StarterPrompts)
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		res, err := db.ExecContext(r.Context(), `
 			UPDATE agents
-			SET name=?, description=?, provider=?, model=?, system_prompt=?, allowed_tools=?, updated_at=?
+			SET name=?, description=?, provider=?, model=?, system_prompt=?, allowed_tools=?, starter_prompts=?, default_task=?, default_max_steps=?, default_workspace_path=?, updated_at=?
 			WHERE id=?
-		`, req.Name, req.Description, req.Provider, req.Model, req.SystemPrompt, string(toolsJSON), now, agentID)
+		`, req.Name, req.Description, req.Provider, req.Model, req.SystemPrompt, string(toolsJSON), string(starterPromptsJSON), req.DefaultTask, req.DefaultMaxSteps, req.DefaultWorkspacePath, now, agentID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -351,15 +401,6 @@ func deleteAgentHandler(db *sql.DB) http.HandlerFunc {
 				return
 			}
 			deletedRuns = n
-		}
-		var suiteCount int
-		if err := db.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM eval_suites WHERE agent_id=?`, agentID).Scan(&suiteCount); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if suiteCount > 0 {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is used by eval suites; cannot delete"})
-			return
 		}
 		res, err := db.ExecContext(r.Context(), `DELETE FROM agents WHERE id=?`, agentID)
 		if err != nil {
@@ -409,8 +450,6 @@ func deleteRunsForAgent(ctx context.Context, db *sql.DB, agentID string) (int64,
 	}()
 
 	deleteStatements := []string{
-		`DELETE FROM workflow_runs WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
-		`DELETE FROM evaluations WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
 		`DELETE FROM approvals WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
 		`DELETE FROM containers WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
 		`DELETE FROM artifacts WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
@@ -573,18 +612,20 @@ func createRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 			return
 		}
-		if req.AgentID == "" || req.Task == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_id and task required"})
+		if req.AgentID == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "agent_id required"})
 			return
-		}
-		if req.MaxSteps <= 0 {
-			req.MaxSteps = 30
 		}
 		if req.ReplayFromStep <= 0 {
 			req.ReplayFromStep = 1
 		}
-		var defaultProvider, defaultModel string
-		err := db.QueryRowContext(r.Context(), `SELECT provider, model FROM agents WHERE id=?`, req.AgentID).Scan(&defaultProvider, &defaultModel)
+		var defaultProvider, defaultModel, defaultTask, defaultWorkspacePath string
+		var defaultMaxSteps int
+		err := db.QueryRowContext(
+			r.Context(),
+			`SELECT provider, model, default_task, default_max_steps, default_workspace_path FROM agents WHERE id=?`,
+			req.AgentID,
+		).Scan(&defaultProvider, &defaultModel, &defaultTask, &defaultMaxSteps, &defaultWorkspacePath)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "agent not found"})
 			return
@@ -598,6 +639,27 @@ func createRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 		}
 		if req.Model == "" {
 			req.Model = defaultModel
+		}
+		if req.Task == "" {
+			req.Task = defaultTask
+		}
+		if strings.TrimSpace(req.Task) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "task required (or configure agent default_task)"})
+			return
+		}
+		if req.MaxSteps <= 0 {
+			req.MaxSteps = defaultMaxSteps
+		}
+		if req.MaxSteps <= 0 {
+			req.MaxSteps = 30
+		}
+		if err := validateEnvironmentID(r.Context(), db, req.EnvironmentID); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := validateCredentialVaultID(r.Context(), db, req.CredentialVaultID); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
 		}
 		if req.ReplaySourceRunID != "" {
 			var replayCount int
@@ -614,7 +676,7 @@ func createRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		workspacePath := req.WorkspacePath
 		if workspacePath == "" {
-			workspacePath = filepath.Join(workspaceRoot, id)
+			workspacePath = resolveWorkspacePath(defaultWorkspacePath, workspaceRoot, id)
 		}
 		workspacePath, err = filepath.Abs(workspacePath)
 		if err != nil {
@@ -637,9 +699,9 @@ func createRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 			}
 		}
 		_, err = db.ExecContext(r.Context(), `
-			INSERT INTO runs(id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,created_at,updated_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-		`, id, req.AgentID, "queued", req.Task, workspacePath, req.Provider, req.Model, req.MaxSteps, req.ReplaySourceRunID, req.ReplayFromStep, now, now)
+			INSERT INTO runs(id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,environment_id,credential_vault_id,created_at,updated_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		`, id, req.AgentID, "queued", req.Task, workspacePath, req.Provider, req.Model, req.MaxSteps, req.ReplaySourceRunID, req.ReplayFromStep, req.EnvironmentID, req.CredentialVaultID, now, now)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -647,6 +709,65 @@ func createRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 		_, _ = db.ExecContext(r.Context(), `INSERT INTO events(id,run_id,event_type,seq,payload_json,created_at) VALUES(?,?,?,?,?,?)`, uuid.NewString(), id, "run.created", 1, `{"status":"queued"}`, now)
 		writeJSON(w, http.StatusCreated, map[string]any{"id": id, "status": "queued", "workspace_path": workspacePath})
 	}
+}
+
+func normalizeStarterPrompts(prompts []string) []string {
+	if len(prompts) == 0 {
+		return []string{}
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(prompts))
+	for _, prompt := range prompts {
+		cleaned := strings.TrimSpace(prompt)
+		if cleaned == "" || seen[cleaned] {
+			continue
+		}
+		if len(cleaned) > 280 {
+			cleaned = cleaned[:280]
+		}
+		seen[cleaned] = true
+		out = append(out, cleaned)
+		if len(out) >= 16 {
+			break
+		}
+	}
+	return out
+}
+
+func resolveWorkspacePath(defaultPath, workspaceRoot, runID string) string {
+	candidate := strings.TrimSpace(defaultPath)
+	if candidate == "" {
+		return filepath.Join(workspaceRoot, runID)
+	}
+	return strings.ReplaceAll(candidate, "{{run_id}}", runID)
+}
+
+func validateEnvironmentID(ctx context.Context, db *sql.DB, environmentID string) error {
+	if strings.TrimSpace(environmentID) == "" {
+		return nil
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(1) FROM environments WHERE id=?`, environmentID).Scan(&count); err != nil {
+		return fmt.Errorf("validate environment: %w", err)
+	}
+	if count == 0 {
+		return errors.New("environment not found")
+	}
+	return nil
+}
+
+func validateCredentialVaultID(ctx context.Context, db *sql.DB, vaultID string) error {
+	if strings.TrimSpace(vaultID) == "" {
+		return nil
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(1) FROM credential_vaults WHERE id=?`, vaultID).Scan(&count); err != nil {
+		return fmt.Errorf("validate credential vault: %w", err)
+	}
+	if count == 0 {
+		return errors.New("credential vault not found")
+	}
+	return nil
 }
 
 func replayRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
@@ -657,6 +778,8 @@ func replayRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 			Provider       string `json:"provider"`
 			Model          string `json:"model"`
 			MaxSteps       int    `json:"max_steps"`
+			EnvironmentID  string `json:"environment_id"`
+			VaultID        string `json:"credential_vault_id"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
@@ -672,9 +795,11 @@ func replayRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 			Provider      string
 			Model         string
 			MaxSteps      int
+			EnvironmentID string
+			VaultID       string
 		}
-		err := db.QueryRowContext(r.Context(), `SELECT agent_id,task,workspace_path,provider,model,max_steps FROM runs WHERE id=?`, sourceRunID).
-			Scan(&src.AgentID, &src.Task, &src.WorkspacePath, &src.Provider, &src.Model, &src.MaxSteps)
+		err := db.QueryRowContext(r.Context(), `SELECT agent_id,task,workspace_path,provider,model,max_steps,environment_id,credential_vault_id FROM runs WHERE id=?`, sourceRunID).
+			Scan(&src.AgentID, &src.Task, &src.WorkspacePath, &src.Provider, &src.Model, &src.MaxSteps, &src.EnvironmentID, &src.VaultID)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "source run not found"})
 			return
@@ -694,6 +819,20 @@ func replayRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 		}
 		if req.MaxSteps <= 0 {
 			req.MaxSteps = 30
+		}
+		if req.EnvironmentID == "" {
+			req.EnvironmentID = src.EnvironmentID
+		}
+		if req.VaultID == "" {
+			req.VaultID = src.VaultID
+		}
+		if err := validateEnvironmentID(r.Context(), db, req.EnvironmentID); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := validateCredentialVaultID(r.Context(), db, req.VaultID); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
 		}
 
 		id := uuid.NewString()
@@ -715,9 +854,9 @@ func replayRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 			}
 		}
 		_, err = db.ExecContext(r.Context(), `
-			INSERT INTO runs(id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,created_at,updated_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-		`, id, src.AgentID, "queued", src.Task, workspacePath, req.Provider, req.Model, req.MaxSteps, sourceRunID, req.ResumeFromStep, now, now)
+			INSERT INTO runs(id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,environment_id,credential_vault_id,created_at,updated_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		`, id, src.AgentID, "queued", src.Task, workspacePath, req.Provider, req.Model, req.MaxSteps, sourceRunID, req.ResumeFromStep, req.EnvironmentID, req.VaultID, now, now)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -730,7 +869,7 @@ func replayRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 
 func listRunsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		rows, err := db.QueryContext(r.Context(), `SELECT id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,created_at,updated_at,started_at,completed_at,error FROM runs ORDER BY created_at DESC`)
+		rows, err := db.QueryContext(r.Context(), `SELECT id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,environment_id,credential_vault_id,created_at,updated_at,started_at,completed_at,error FROM runs ORDER BY created_at DESC`)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -738,10 +877,10 @@ func listRunsHandler(db *sql.DB) http.HandlerFunc {
 		defer rows.Close()
 		out := make([]map[string]any, 0)
 		for rows.Next() {
-			var id, agentID, status, task, ws, provider, model, createdAt, updatedAt, runErr, replaySource string
+			var id, agentID, status, task, ws, provider, model, createdAt, updatedAt, runErr, replaySource, environmentID, vaultID string
 			var startedAt, completedAt sql.NullString
 			var maxSteps, replayFromStep int
-			if err := rows.Scan(&id, &agentID, &status, &task, &ws, &provider, &model, &maxSteps, &replaySource, &replayFromStep, &createdAt, &updatedAt, &startedAt, &completedAt, &runErr); err != nil {
+			if err := rows.Scan(&id, &agentID, &status, &task, &ws, &provider, &model, &maxSteps, &replaySource, &replayFromStep, &environmentID, &vaultID, &createdAt, &updatedAt, &startedAt, &completedAt, &runErr); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
@@ -749,6 +888,7 @@ func listRunsHandler(db *sql.DB) http.HandlerFunc {
 				"id": id, "agent_id": agentID, "status": status, "task": task, "workspace_path": ws,
 				"provider": provider, "model": model, "max_steps": maxSteps,
 				"replay_source_run_id": replaySource, "replay_from_step": replayFromStep,
+				"environment_id": environmentID, "credential_vault_id": vaultID,
 				"created_at": createdAt, "updated_at": updatedAt, "started_at": startedAt.String, "completed_at": completedAt.String, "error": runErr,
 			})
 		}
@@ -759,11 +899,11 @@ func listRunsHandler(db *sql.DB) http.HandlerFunc {
 func getRunHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID := chi.URLParam(r, "id")
-		var id, agentID, status, task, ws, provider, model, createdAt, updatedAt, runErr, replaySource string
+		var id, agentID, status, task, ws, provider, model, createdAt, updatedAt, runErr, replaySource, environmentID, vaultID string
 		var startedAt, completedAt sql.NullString
 		var maxSteps, replayFromStep int
-		err := db.QueryRowContext(r.Context(), `SELECT id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,created_at,updated_at,started_at,completed_at,error FROM runs WHERE id=?`, runID).
-			Scan(&id, &agentID, &status, &task, &ws, &provider, &model, &maxSteps, &replaySource, &replayFromStep, &createdAt, &updatedAt, &startedAt, &completedAt, &runErr)
+		err := db.QueryRowContext(r.Context(), `SELECT id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,environment_id,credential_vault_id,created_at,updated_at,started_at,completed_at,error FROM runs WHERE id=?`, runID).
+			Scan(&id, &agentID, &status, &task, &ws, &provider, &model, &maxSteps, &replaySource, &replayFromStep, &environmentID, &vaultID, &createdAt, &updatedAt, &startedAt, &completedAt, &runErr)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
 			return
@@ -776,6 +916,7 @@ func getRunHandler(db *sql.DB) http.HandlerFunc {
 			"id": id, "agent_id": agentID, "status": status, "task": task, "workspace_path": ws,
 			"provider": provider, "model": model, "max_steps": maxSteps,
 			"replay_source_run_id": replaySource, "replay_from_step": replayFromStep,
+			"environment_id": environmentID, "credential_vault_id": vaultID,
 			"created_at": createdAt, "updated_at": updatedAt, "started_at": startedAt, "completed_at": completedAt, "error": runErr,
 		})
 	}
@@ -1046,99 +1187,6 @@ func isUsableOpenAIModel(id string) bool {
 		strings.HasPrefix(lower, "o4")
 }
 
-func listWorkflowsHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		rows, err := db.QueryContext(r.Context(), `SELECT id,name,definition_json,created_at,updated_at FROM workflow_defs ORDER BY created_at DESC`)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		defer rows.Close()
-		out := make([]map[string]any, 0)
-		for rows.Next() {
-			var id, name, definition, createdAt, updatedAt string
-			if err := rows.Scan(&id, &name, &definition, &createdAt, &updatedAt); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-				return
-			}
-			out = append(out, map[string]any{"id": id, "name": name, "definition": json.RawMessage(definition), "created_at": createdAt, "updated_at": updatedAt})
-		}
-		writeJSON(w, http.StatusOK, out)
-	}
-}
-
-func createWorkflowHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Name       string         `json:"name"`
-			Definition map[string]any `json:"definition"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
-			return
-		}
-		if req.Name == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
-			return
-		}
-		id := uuid.NewString()
-		now := time.Now().UTC().Format(time.RFC3339Nano)
-		body, _ := json.Marshal(req.Definition)
-		_, err := db.ExecContext(r.Context(), `INSERT INTO workflow_defs(id,name,definition_json,created_at,updated_at) VALUES(?,?,?,?,?)`, id, req.Name, string(body), now, now)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusCreated, map[string]string{"id": id})
-	}
-}
-
-func updateWorkflowHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-		var req struct {
-			Name       string         `json:"name"`
-			Definition map[string]any `json:"definition"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
-			return
-		}
-		if req.Name == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
-			return
-		}
-		body, _ := json.Marshal(req.Definition)
-		now := time.Now().UTC().Format(time.RFC3339Nano)
-		res, err := db.ExecContext(r.Context(), `UPDATE workflow_defs SET name=?, definition_json=?, updated_at=? WHERE id=?`, req.Name, string(body), now, id)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "workflow not found"})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"id": id})
-	}
-}
-
-func deleteWorkflowHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-		res, err := db.ExecContext(r.Context(), `DELETE FROM workflow_defs WHERE id=?`, id)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "workflow not found"})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
-	}
-}
-
 func listPoliciesHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, fetchRows(r.Context(), db, `SELECT id,name,definition_json,enabled,created_at,updated_at FROM policies ORDER BY created_at DESC`))
@@ -1323,6 +1371,264 @@ func deleteProviderConfigHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+func listEnvironmentsHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, fetchRows(r.Context(), db, `SELECT id,name,description,config_json,enabled,created_at,updated_at FROM environments ORDER BY updated_at DESC`))
+	}
+}
+
+func createEnvironmentHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Name        string          `json:"name"`
+			Description string          `json:"description"`
+			Config      json.RawMessage `json:"config"`
+			Enabled     bool            `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+			return
+		}
+		if strings.TrimSpace(req.Name) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+			return
+		}
+		if len(req.Config) == 0 {
+			req.Config = json.RawMessage(`{}`)
+		}
+		id := uuid.NewString()
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		enabled := 0
+		if req.Enabled {
+			enabled = 1
+		}
+		_, err := db.ExecContext(r.Context(), `INSERT INTO environments(id,name,description,config_json,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`,
+			id, strings.TrimSpace(req.Name), req.Description, string(req.Config), enabled, now, now)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+	}
+}
+
+func updateEnvironmentHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		var req struct {
+			Name        string          `json:"name"`
+			Description string          `json:"description"`
+			Config      json.RawMessage `json:"config"`
+			Enabled     bool            `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+			return
+		}
+		if len(req.Config) == 0 {
+			req.Config = json.RawMessage(`{}`)
+		}
+		enabled := 0
+		if req.Enabled {
+			enabled = 1
+		}
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		res, err := db.ExecContext(r.Context(), `UPDATE environments SET name=?,description=?,config_json=?,enabled=?,updated_at=? WHERE id=?`,
+			strings.TrimSpace(req.Name), req.Description, string(req.Config), enabled, now, id)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "environment not found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"id": id})
+	}
+}
+
+func deleteEnvironmentHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		var runCount int
+		if err := db.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM runs WHERE environment_id=?`, id).Scan(&runCount); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if runCount > 0 {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "environment is referenced by sessions"})
+			return
+		}
+		res, err := db.ExecContext(r.Context(), `DELETE FROM environments WHERE id=?`, id)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "environment not found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+	}
+}
+
+func listCredentialVaultsHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, fetchRows(r.Context(), db, `
+			SELECT v.id,v.name,v.description,v.created_at,v.updated_at,COUNT(i.id) AS item_count
+			FROM credential_vaults v
+			LEFT JOIN credential_vault_items i ON i.vault_id=v.id
+			GROUP BY v.id
+			ORDER BY v.updated_at DESC
+		`))
+	}
+}
+
+func createCredentialVaultHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+			return
+		}
+		if strings.TrimSpace(req.Name) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+			return
+		}
+		id := uuid.NewString()
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		_, err := db.ExecContext(r.Context(), `INSERT INTO credential_vaults(id,name,description,created_at,updated_at) VALUES(?,?,?,?,?)`,
+			id, strings.TrimSpace(req.Name), req.Description, now, now)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+	}
+}
+
+func updateCredentialVaultHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		var req struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+			return
+		}
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		res, err := db.ExecContext(r.Context(), `UPDATE credential_vaults SET name=?,description=?,updated_at=? WHERE id=?`,
+			strings.TrimSpace(req.Name), req.Description, now, id)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "credential vault not found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"id": id})
+	}
+}
+
+func deleteCredentialVaultHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		var runCount int
+		if err := db.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM runs WHERE credential_vault_id=?`, id).Scan(&runCount); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if runCount > 0 {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "credential vault is referenced by sessions"})
+			return
+		}
+		res, err := db.ExecContext(r.Context(), `DELETE FROM credential_vaults WHERE id=?`, id)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "credential vault not found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+	}
+}
+
+func listCredentialVaultItemsHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vaultID := chi.URLParam(r, "id")
+		writeJSON(w, http.StatusOK, fetchRows(r.Context(), db, `
+			SELECT id,vault_id,secret_name,alias,created_at,updated_at
+			FROM credential_vault_items
+			WHERE vault_id=?
+			ORDER BY updated_at DESC
+		`, vaultID))
+	}
+}
+
+func upsertCredentialVaultItemHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vaultID := chi.URLParam(r, "id")
+		var req struct {
+			SecretName string `json:"secret_name"`
+			Alias      string `json:"alias"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+			return
+		}
+		if strings.TrimSpace(req.SecretName) == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "secret_name required"})
+			return
+		}
+		var exists int
+		if err := db.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM credential_vaults WHERE id=?`, vaultID).Scan(&exists); err != nil || exists == 0 {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "credential vault not found"})
+			return
+		}
+		if err := db.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM secrets WHERE name=?`, req.SecretName).Scan(&exists); err != nil || exists == 0 {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "secret not found"})
+			return
+		}
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		id := uuid.NewString()
+		_, err := db.ExecContext(r.Context(), `
+			INSERT INTO credential_vault_items(id,vault_id,secret_name,alias,created_at,updated_at)
+			VALUES(?,?,?,?,?,?)
+			ON CONFLICT(vault_id,secret_name) DO UPDATE SET alias=excluded.alias, updated_at=excluded.updated_at
+		`, id, vaultID, strings.TrimSpace(req.SecretName), strings.TrimSpace(req.Alias), now, now)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{"vault_id": vaultID, "secret_name": req.SecretName})
+	}
+}
+
+func deleteCredentialVaultItemHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vaultID := chi.URLParam(r, "id")
+		secretName := chi.URLParam(r, "secretName")
+		res, err := db.ExecContext(r.Context(), `DELETE FROM credential_vault_items WHERE vault_id=? AND secret_name=?`, vaultID, secretName)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "vault secret binding not found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+	}
+}
+
 func createSecretHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -1415,6 +1721,113 @@ func streamRunEventsHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+func uploadRunFilesHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		runID := chi.URLParam(r, "id")
+		var workspacePath string
+		var runStatus string
+		err := db.QueryRowContext(r.Context(), `SELECT workspace_path,status FROM runs WHERE id=?`, runID).Scan(&workspacePath, &runStatus)
+		if errors.Is(err, sql.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		switch runStatus {
+		case "completed", "failed", "cancelled":
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "session is closed; cannot upload files"})
+			return
+		}
+
+		if err := r.ParseMultipartForm(64 << 20); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid multipart payload"})
+			return
+		}
+		files := r.MultipartForm.File["files"]
+		if len(files) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no files uploaded"})
+			return
+		}
+		nowTs := time.Now().UTC().Format(time.RFC3339Nano)
+		uploadRoot := filepath.Join(workspacePath, "uploads")
+		if err := os.MkdirAll(uploadRoot, 0o755); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create upload directory"})
+			return
+		}
+		uploaded := make([]map[string]any, 0, len(files))
+		for _, fileHeader := range files {
+			if fileHeader == nil {
+				continue
+			}
+			src, err := fileHeader.Open()
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read uploaded file"})
+				return
+			}
+			baseName := sanitizeUploadFilename(fileHeader.Filename)
+			dstPath := uniqueFilePath(uploadRoot, baseName)
+			dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+			if err != nil {
+				_ = src.Close()
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to write uploaded file"})
+				return
+			}
+			written, copyErr := io.Copy(dst, src)
+			_ = dst.Close()
+			_ = src.Close()
+			if copyErr != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to copy uploaded file"})
+				return
+			}
+			_, _ = db.ExecContext(r.Context(), `
+				INSERT INTO artifacts(id,run_id,step_id,kind,path,mime_type,size_bytes,created_at)
+				VALUES(?,?,?,?,?,?,?,?)
+			`, uuid.NewString(), runID, "", "uploaded_file", dstPath, fileHeader.Header.Get("Content-Type"), written, nowTs)
+			relPath := strings.TrimPrefix(strings.ReplaceAll(dstPath, filepath.Clean(workspacePath), ""), string(filepath.Separator))
+			uploaded = append(uploaded, map[string]any{
+				"name":       baseName,
+				"path":       relPath,
+				"size_bytes": written,
+			})
+		}
+		if len(uploaded) > 0 {
+			payload, _ := json.Marshal(map[string]any{"count": len(uploaded), "files": uploaded})
+			_, _ = db.ExecContext(r.Context(),
+				`INSERT INTO events(id,run_id,step_id,event_type,seq,payload_json,created_at) VALUES(?,?,?,?,?,?,?)`,
+				uuid.NewString(), runID, "", "session.files_uploaded", nextEventSeq(db, runID), string(payload), nowTs,
+			)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"uploaded": uploaded, "count": len(uploaded)})
+	}
+}
+
+func sanitizeUploadFilename(name string) string {
+	clean := strings.TrimSpace(filepath.Base(name))
+	if clean == "" || clean == "." || clean == string(filepath.Separator) {
+		return "upload.bin"
+	}
+	clean = strings.ReplaceAll(clean, "..", "_")
+	return clean
+}
+
+func uniqueFilePath(rootDir, fileName string) string {
+	target := filepath.Join(rootDir, fileName)
+	if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
+		return target
+	}
+	ext := filepath.Ext(fileName)
+	base := strings.TrimSuffix(fileName, ext)
+	for i := 1; i <= 9999; i++ {
+		candidate := filepath.Join(rootDir, fmt.Sprintf("%s-%d%s", base, i, ext))
+		if _, err := os.Stat(candidate); errors.Is(err, os.ErrNotExist) {
+			return candidate
+		}
+	}
+	return filepath.Join(rootDir, fmt.Sprintf("%s-%d%s", base, time.Now().UnixNano(), ext))
+}
+
 func exportRunBundleHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID := chi.URLParam(r, "id")
@@ -1450,301 +1863,12 @@ func exportRunBundleHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func listEvalSuitesHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, fetchRows(r.Context(), db, `
-			SELECT s.id,s.name,s.description,s.agent_id,s.created_at,s.updated_at,
-			       (SELECT COUNT(1) FROM eval_cases c WHERE c.suite_id=s.id) AS case_count,
-			       (SELECT status FROM eval_runs er WHERE er.suite_id=s.id ORDER BY er.created_at DESC LIMIT 1) AS latest_status,
-			       (SELECT created_at FROM eval_runs er WHERE er.suite_id=s.id ORDER BY er.created_at DESC LIMIT 1) AS latest_run_at
-			FROM eval_suites s ORDER BY s.updated_at DESC
-		`))
-	}
-}
-
-func getEvalSuiteHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		suiteID := chi.URLParam(r, "id")
-		var count int
-		if err := db.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM eval_suites WHERE id=?`, suiteID).Scan(&count); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if count == 0 {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "suite not found"})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"suite": dbRow(r.Context(), db, `SELECT id,name,description,agent_id,created_at,updated_at FROM eval_suites WHERE id=?`, suiteID),
-			"cases": fetchRows(r.Context(), db, `SELECT id,name,task,assertion_json,position,created_at,updated_at FROM eval_cases WHERE suite_id=? ORDER BY position ASC, created_at ASC`, suiteID),
-			"runs":  fetchRows(r.Context(), db, `SELECT id,status,provider,model,max_steps,total_cases,passed_cases,failed_cases,created_at,started_at,completed_at,summary_json,error FROM eval_runs WHERE suite_id=? ORDER BY created_at DESC LIMIT 20`, suiteID),
-		})
-	}
-}
-
-func createEvalSuiteHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Name        string `json:"name"`
-			Description string `json:"description"`
-			AgentID     string `json:"agent_id"`
-			Cases       []struct {
-				Name      string          `json:"name"`
-				Task      string          `json:"task"`
-				Assertion json.RawMessage `json:"assertion"`
-			} `json:"cases"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
-			return
-		}
-		if req.Name == "" || req.AgentID == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name and agent_id required"})
-			return
-		}
-		var agentCount int
-		if err := db.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM agents WHERE id=?`, req.AgentID).Scan(&agentCount); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if agentCount == 0 {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "agent not found"})
-			return
-		}
-		tx, err := db.BeginTx(r.Context(), nil)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		suiteID := uuid.NewString()
-		now := time.Now().UTC().Format(time.RFC3339Nano)
-		if _, err := tx.ExecContext(r.Context(), `INSERT INTO eval_suites(id,name,description,agent_id,created_at,updated_at) VALUES(?,?,?,?,?,?)`, suiteID, req.Name, req.Description, req.AgentID, now, now); err != nil {
-			_ = tx.Rollback()
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		for idx, c := range req.Cases {
-			if strings.TrimSpace(c.Name) == "" || strings.TrimSpace(c.Task) == "" {
-				continue
-			}
-			assertion := c.Assertion
-			if len(assertion) == 0 {
-				assertion = json.RawMessage(`{}`)
-			}
-			if _, err := tx.ExecContext(r.Context(), `
-				INSERT INTO eval_cases(id,suite_id,name,task,assertion_json,position,created_at,updated_at)
-				VALUES(?,?,?,?,?,?,?,?)
-			`, uuid.NewString(), suiteID, c.Name, c.Task, string(assertion), idx, now, now); err != nil {
-				_ = tx.Rollback()
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-				return
-			}
-		}
-		if err := tx.Commit(); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusCreated, map[string]string{"id": suiteID})
-	}
-}
-
-func updateEvalSuiteHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		suiteID := chi.URLParam(r, "id")
-		var req struct {
-			Name        string `json:"name"`
-			Description string `json:"description"`
-			AgentID     string `json:"agent_id"`
-			Cases       []struct {
-				ID        string          `json:"id"`
-				Name      string          `json:"name"`
-				Task      string          `json:"task"`
-				Assertion json.RawMessage `json:"assertion"`
-			} `json:"cases"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
-			return
-		}
-		tx, err := db.BeginTx(r.Context(), nil)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		now := time.Now().UTC().Format(time.RFC3339Nano)
-		res, err := tx.ExecContext(r.Context(), `UPDATE eval_suites SET name=?, description=?, agent_id=?, updated_at=? WHERE id=?`, req.Name, req.Description, req.AgentID, now, suiteID)
-		if err != nil {
-			_ = tx.Rollback()
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			_ = tx.Rollback()
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "suite not found"})
-			return
-		}
-		_, _ = tx.ExecContext(r.Context(), `DELETE FROM eval_cases WHERE suite_id=?`, suiteID)
-		for idx, c := range req.Cases {
-			if strings.TrimSpace(c.Name) == "" || strings.TrimSpace(c.Task) == "" {
-				continue
-			}
-			assertion := c.Assertion
-			if len(assertion) == 0 {
-				assertion = json.RawMessage(`{}`)
-			}
-			caseID := c.ID
-			if caseID == "" {
-				caseID = uuid.NewString()
-			}
-			if _, err := tx.ExecContext(r.Context(), `
-				INSERT INTO eval_cases(id,suite_id,name,task,assertion_json,position,created_at,updated_at)
-				VALUES(?,?,?,?,?,?,?,?)
-			`, caseID, suiteID, c.Name, c.Task, string(assertion), idx, now, now); err != nil {
-				_ = tx.Rollback()
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-				return
-			}
-		}
-		if err := tx.Commit(); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"id": suiteID})
-	}
-}
-
-func queueEvalRunHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		suiteID := chi.URLParam(r, "id")
-		var req struct {
-			Provider string `json:"provider"`
-			Model    string `json:"model"`
-			MaxSteps int    `json:"max_steps"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
-			return
-		}
-		if req.MaxSteps <= 0 {
-			req.MaxSteps = 30
-		}
-		var suiteCount int
-		if err := db.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM eval_suites WHERE id=?`, suiteID).Scan(&suiteCount); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if suiteCount == 0 {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "suite not found"})
-			return
-		}
-		evalRunID := uuid.NewString()
-		now := time.Now().UTC().Format(time.RFC3339Nano)
-		_, err := db.ExecContext(r.Context(), `
-			INSERT INTO eval_runs(id,suite_id,status,provider,model,max_steps,created_at,summary_json,error)
-			VALUES(?,?,?,?,?,?,?,?,?)
-		`, evalRunID, suiteID, "queued", req.Provider, req.Model, req.MaxSteps, now, "{}", "")
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusCreated, map[string]string{"id": evalRunID, "status": "queued"})
-	}
-}
-
-func listEvalRunsHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, fetchRows(r.Context(), db, `
-			SELECT er.id,er.suite_id,s.name AS suite_name,er.status,er.provider,er.model,er.max_steps,er.total_cases,er.passed_cases,er.failed_cases,er.created_at,er.started_at,er.completed_at,er.summary_json,er.error
-			FROM eval_runs er
-			JOIN eval_suites s ON s.id=er.suite_id
-			ORDER BY er.created_at DESC
-		`))
-	}
-}
-
-func getEvalRunHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		evalRunID := chi.URLParam(r, "id")
-		var count int
-		if err := db.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM eval_runs WHERE id=?`, evalRunID).Scan(&count); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if count == 0 {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "eval run not found"})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"run":   dbRow(r.Context(), db, `SELECT id,suite_id,status,provider,model,max_steps,total_cases,passed_cases,failed_cases,created_at,started_at,completed_at,summary_json,error FROM eval_runs WHERE id=?`, evalRunID),
-			"cases": fetchRows(r.Context(), db, `SELECT id,case_id,run_id,status,score,latency_ms,input_tokens,output_tokens,result_excerpt,checks_json,error,created_at,completed_at FROM eval_case_runs WHERE eval_run_id=? ORDER BY created_at ASC`, evalRunID),
-		})
-	}
-}
-
-func getEvalRegressionHandler(db *sql.DB) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		suiteID := chi.URLParam(r, "id")
-		rows := fetchRows(r.Context(), db, `SELECT id,created_at,summary_json FROM eval_runs WHERE suite_id=? AND status='completed' ORDER BY created_at DESC LIMIT 2`, suiteID)
-		if len(rows) < 2 {
-			writeJSON(w, http.StatusOK, map[string]any{"ready": false, "message": "need at least two completed eval runs"})
-			return
-		}
-		latestID, _ := rows[0]["id"].(string)
-		prevID, _ := rows[1]["id"].(string)
-		latestCases := fetchRows(r.Context(), db, `SELECT case_id,status,score,latency_ms,input_tokens,output_tokens FROM eval_case_runs WHERE eval_run_id=?`, latestID)
-		prevCases := fetchRows(r.Context(), db, `SELECT case_id,status,score,latency_ms,input_tokens,output_tokens FROM eval_case_runs WHERE eval_run_id=?`, prevID)
-		prevByCase := map[string]map[string]any{}
-		for _, c := range prevCases {
-			if id, ok := c["case_id"].(string); ok {
-				prevByCase[id] = c
-			}
-		}
-		deltas := make([]map[string]any, 0, len(latestCases))
-		for _, curr := range latestCases {
-			caseID, _ := curr["case_id"].(string)
-			prev := prevByCase[caseID]
-			deltas = append(deltas, map[string]any{
-				"case_id":            caseID,
-				"latest_status":      curr["status"],
-				"previous_status":    prev["status"],
-				"score_delta":        numberValue(curr["score"]) - numberValue(prev["score"]),
-				"latency_delta_ms":   int(numberValue(curr["latency_ms"]) - numberValue(prev["latency_ms"])),
-				"input_token_delta":  int(numberValue(curr["input_tokens"]) - numberValue(prev["input_tokens"])),
-				"output_token_delta": int(numberValue(curr["output_tokens"]) - numberValue(prev["output_tokens"])),
-			})
-		}
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ready":                true,
-			"latest_eval_run_id":   latestID,
-			"previous_eval_run_id": prevID,
-			"deltas":               deltas,
-		})
-	}
-}
-
 func dbRow(ctx context.Context, db *sql.DB, query string, args ...any) map[string]any {
 	rows := fetchRows(ctx, db, query, args...)
 	if len(rows) == 0 {
 		return map[string]any{}
 	}
 	return rows[0]
-}
-
-func numberValue(v any) float64 {
-	switch n := v.(type) {
-	case float64:
-		return n
-	case int64:
-		return float64(n)
-	case int:
-		return float64(n)
-	case string:
-		var out float64
-		_, _ = fmt.Sscanf(n, "%f", &out)
-		return out
-	default:
-		return 0
-	}
 }
 
 func fetchRows(ctx context.Context, db *sql.DB, query string, args ...any) []map[string]any {

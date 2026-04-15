@@ -291,6 +291,13 @@ func (e *Executor) runBrowserScriptDocker(ctx context.Context, runCtx Context, p
 		"-w", "/workspace",
 		"-e", "BROWSER_TOOL_INPUT=" + string(payload),
 	}
+	for key, value := range runCtx.EnvVars {
+		k := strings.TrimSpace(key)
+		if !isValidEnvName(k) {
+			continue
+		}
+		args = append(args, "-e", k+"="+value)
+	}
 	if nodePathHost := resolvePlaywrightNodePath(); nodePathHost != "" {
 		if absNodePath, err := filepath.Abs(nodePathHost); err == nil {
 			args = append(args,
@@ -325,7 +332,8 @@ func (e *Executor) runBrowserScriptLocal(ctx context.Context, runCtx Context, pa
 	script := browserNodeScript()
 	cmd := exec.CommandContext(ctx, "node", "-e", script)
 	cmd.Dir = runCtx.Workspace
-	env := append(os.Environ(), "BROWSER_TOOL_INPUT="+string(payload), "BROWSER_TOOL_SESSION_DIR="+sessionDir)
+	env := mergeEnv(sanitizedBaseEnv(), runCtx.EnvVars)
+	env = append(env, "BROWSER_TOOL_INPUT="+string(payload), "BROWSER_TOOL_SESSION_DIR="+sessionDir)
 	if nodePath := resolvePlaywrightNodePath(); nodePath != "" {
 		existing := os.Getenv("NODE_PATH")
 		if existing != "" {

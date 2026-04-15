@@ -41,13 +41,16 @@ type Executor struct {
 }
 
 type DockerExecutor interface {
-	Exec(ctx context.Context, runID, workspace, command string, timeout time.Duration) (string, string, int, error)
+	Exec(ctx context.Context, runID, workspace string, envVars map[string]string, command string, timeout time.Duration) (string, string, int, error)
 }
 
 type Context struct {
-	RunID     string
-	StepID    string
-	Workspace string
+	RunID             string
+	StepID            string
+	Workspace         string
+	EnvironmentID     string
+	CredentialVaultID string
+	EnvVars           map[string]string
 }
 
 type Result struct {
@@ -193,7 +196,7 @@ func (e *Executor) shellExec(ctx context.Context, runCtx Context, input json.Raw
 		req.Timeout = 120
 	}
 	if e.Docker != nil {
-		stdout, stderr, exitCode, err := e.Docker.Exec(ctx, runCtx.RunID, runCtx.Workspace, req.Command, time.Duration(req.Timeout)*time.Second)
+		stdout, stderr, exitCode, err := e.Docker.Exec(ctx, runCtx.RunID, runCtx.Workspace, runCtx.EnvVars, req.Command, time.Duration(req.Timeout)*time.Second)
 		output := truncateOutput(stdout+stderr, 512000)
 		artifactPath, _ := e.writeRunArtifact(runCtx, "shell", "log", []byte(output))
 		if artifactPath != "" {
@@ -217,6 +220,7 @@ func (e *Executor) shellExec(ctx context.Context, runCtx Context, input json.Raw
 	defer cancel()
 	cmd := exec.CommandContext(cctx, "bash", "-lc", req.Command)
 	cmd.Dir = runCtx.Workspace
+	cmd.Env = mergeEnv(sanitizedBaseEnv(), runCtx.EnvVars)
 	out, err := cmd.CombinedOutput()
 	output := truncateOutput(string(out), 512000)
 	artifactPath, _ := e.writeRunArtifact(runCtx, "shell", "log", []byte(output))
@@ -603,7 +607,7 @@ func (e *Executor) testRun(ctx context.Context, runCtx Context, input json.RawMe
 	var out []byte
 	var err error
 	if e.Docker != nil {
-		stdout, stderr, exitCode, derr := e.Docker.Exec(ctx, runCtx.RunID, runCtx.Workspace, req.Command, 20*time.Minute)
+		stdout, stderr, exitCode, derr := e.Docker.Exec(ctx, runCtx.RunID, runCtx.Workspace, runCtx.EnvVars, req.Command, 20*time.Minute)
 		err = derr
 		if exitCode != 0 && err == nil {
 			err = fmt.Errorf("exit code %d", exitCode)
@@ -612,6 +616,7 @@ func (e *Executor) testRun(ctx context.Context, runCtx Context, input json.RawMe
 	} else {
 		cmd := exec.CommandContext(ctx, "bash", "-lc", req.Command)
 		cmd.Dir = runCtx.Workspace
+		cmd.Env = mergeEnv(sanitizedBaseEnv(), runCtx.EnvVars)
 		out, err = cmd.CombinedOutput()
 		out = []byte(truncateOutput(string(out), 1024*1024))
 	}
@@ -690,6 +695,68 @@ func ioReadAllLimited(r io.Reader, limit int64) ([]byte, error) {
 		b = b[:limit]
 	}
 	return b, nil
+}
+
+func mergeEnv(base []string, injected map[string]string) []string {
+	if len(injected) == 0 {
+		return base
+	}
+	out := append([]string{}, base...)
+	for key, value := range injected {
+		k := strings.TrimSpace(key)
+		if k == "" || !isValidEnvName(k) {
+			continue
+		}
+		out = append(out, k+"="+value)
+	}
+	return out
+}
+
+func sanitizedBaseEnv() []string {
+	base := os.Environ()
+	out := make([]string, 0, len(base))
+	for _, entry := range base {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		if shouldFilterHostEnvKey(key) {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func shouldFilterHostEnvKey(key string) bool {
+	k := strings.ToUpper(strings.TrimSpace(key))
+	if k == "" {
+		return true
+	}
+	if strings.Contains(k, "SECRET") || strings.Contains(k, "TOKEN") || strings.Contains(k, "PASSWORD") || strings.HasSuffix(k, "_KEY") {
+		return true
+	}
+	switch k {
+	case "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN":
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidEnvName(name string) bool {
+	for i, r := range name {
+		if i == 0 {
+			if !((r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || r == '_') {
+				return false
+			}
+			continue
+		}
+		if !((r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_') {
+			return false
+		}
+	}
+	return name != ""
 }
 
 func (e *Executor) writeRunArtifact(runCtx Context, prefix, ext string, content []byte) (string, error) {

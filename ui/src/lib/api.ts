@@ -1,4 +1,4 @@
-import type { Agent, Artifact, EvalRun, EvalSuite, ProviderInfo, Run, RunEvent, RunTelemetry, ToolDef } from './types'
+import type { Agent, Artifact, ProviderInfo, Run, RunEvent, RunTelemetry, ToolDef } from './types'
 
 const jsonHeaders = { 'Content-Type': 'application/json' }
 
@@ -41,26 +41,32 @@ export const api = {
   deleteTool: (id: string) => request<{ deleted: boolean }>(`/api/tools/${id}`, { method: 'DELETE' }),
   testTool: (id: string, body: { workspace_path: string; input: Record<string, unknown> }) =>
     request<{ ok: boolean; output: Record<string, unknown>; log: string; error?: string }>(`/api/tools/${id}/test`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
-  listRuns: () => request<Run[]>('/api/runs'),
-  getRun: (id: string) => request<Run>(`/api/runs/${id}`),
-  getRunTelemetry: (id: string) => request<RunTelemetry>(`/api/runs/${id}/telemetry`),
-  createRun: (body: { agent_id: string; task: string; workspace_path?: string; source_workspace_path?: string; replay_source_run_id?: string; replay_from_step?: number; provider?: string; model?: string; max_steps?: number }) =>
-    request<{ id: string; status: string }>('/api/runs', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
-  replayRun: (id: string, body: { resume_from_step?: number; provider?: string; model?: string; max_steps?: number }) =>
-    request<{ id: string; status: string }>(`/api/runs/${id}/replay`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
-  getRunTrace: (id: string) => request<RunEvent[]>(`/api/runs/${id}/trace`),
-  getRunArtifacts: (id: string) => request<Artifact[]>(`/api/runs/${id}/artifacts`),
-  getRunArtifactContentURL: (runID: string, artifactID: string) => `/api/runs/${runID}/artifacts/${artifactID}/content`,
-  cancelRun: (id: string) => request<{ status: string }>(`/api/runs/${id}/cancel`, { method: 'POST' }),
-  approveRun: (id: string) => request<{ status: string }>(`/api/runs/${id}/approve`, { method: 'POST' }),
-  interruptRun: (id: string) => request<{ status: string }>(`/api/runs/${id}/interrupt`, { method: 'POST' }),
-  resumeRun: (id: string) => request<{ status: string }>(`/api/runs/${id}/resume`, { method: 'POST' }),
+  listRuns: () => request<Run[]>('/api/sessions'),
+  getRun: (id: string) => request<Run>(`/api/sessions/${id}`),
+  getRunTelemetry: (id: string) => request<RunTelemetry>(`/api/sessions/${id}/telemetry`),
+  createRun: (body: { agent_id: string; task: string; workspace_path?: string; source_workspace_path?: string; replay_source_run_id?: string; replay_from_step?: number; provider?: string; model?: string; max_steps?: number; environment_id?: string; credential_vault_id?: string }) =>
+    request<{ id: string; status: string }>('/api/sessions', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
+  replayRun: (id: string, body: { resume_from_step?: number; provider?: string; model?: string; max_steps?: number; environment_id?: string; credential_vault_id?: string }) =>
+    request<{ id: string; status: string }>(`/api/sessions/${id}/replay`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
+  getRunTrace: (id: string) => request<RunEvent[]>(`/api/sessions/${id}/trace`),
+  getRunArtifacts: (id: string) => request<Artifact[]>(`/api/sessions/${id}/artifacts`),
+  getRunArtifactContentURL: (runID: string, artifactID: string) => `/api/sessions/${runID}/artifacts/${artifactID}/content`,
+  cancelRun: (id: string) => request<{ status: string }>(`/api/sessions/${id}/cancel`, { method: 'POST' }),
+  approveRun: (id: string) => request<{ status: string }>(`/api/sessions/${id}/approve`, { method: 'POST' }),
+  interruptRun: (id: string) => request<{ status: string }>(`/api/sessions/${id}/interrupt`, { method: 'POST' }),
+  resumeRun: (id: string) => request<{ status: string }>(`/api/sessions/${id}/resume`, { method: 'POST' }),
   steerRun: (id: string, payload: Record<string, unknown>) =>
-    request<{ seq: number }>(`/api/runs/${id}/events`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(payload) }),
-  listWorkflows: () => request<Array<Record<string, unknown>>>('/api/workflows'),
-  createWorkflow: (body: Record<string, unknown>) => request<{ id: string }>('/api/workflows', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
-  updateWorkflow: (id: string, body: Record<string, unknown>) => request<{ id: string }>(`/api/workflows/${id}`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }),
-  deleteWorkflow: (id: string) => request<{ deleted: boolean }>(`/api/workflows/${id}`, { method: 'DELETE' }),
+    request<{ seq: number }>(`/api/sessions/${id}/events`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(payload) }),
+  uploadSessionFiles: async (id: string, files: File[]) => {
+    const form = new FormData()
+    for (const file of files) form.append('files', file, file.name)
+    const res = await fetch(`/api/sessions/${id}/files`, { method: 'POST', body: form })
+    if (!res.ok) {
+      const raw = await res.text()
+      throw new Error(raw || `File upload failed: ${res.status}`)
+    }
+    return res.json() as Promise<{ uploaded: Array<Record<string, unknown>>; count: number }>
+  },
   listPolicies: () => request<Array<Record<string, unknown>>>('/api/policies'),
   createPolicy: (body: Record<string, unknown>) => request<{ id: string }>('/api/policies', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
   updatePolicy: (id: string, body: Record<string, unknown>) => request<{ id: string }>(`/api/policies/${id}`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }),
@@ -72,12 +78,17 @@ export const api = {
   createProviderConfig: (body: Record<string, unknown>) => request<{ id: string }>('/api/provider-configs', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
   updateProviderConfig: (id: string, body: Record<string, unknown>) => request<{ id: string }>(`/api/provider-configs/${id}`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }),
   deleteProviderConfig: (id: string) => request<{ deleted: boolean }>(`/api/provider-configs/${id}`, { method: 'DELETE' }),
-  listEvalSuites: () => request<EvalSuite[]>('/api/evals/suites'),
-  getEvalSuite: (id: string) => request<{ suite: EvalSuite; cases: Array<Record<string, unknown>>; runs: EvalRun[] }>(`/api/evals/suites/${id}`),
-  createEvalSuite: (body: Record<string, unknown>) => request<{ id: string }>('/api/evals/suites', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
-  updateEvalSuite: (id: string, body: Record<string, unknown>) => request<{ id: string }>(`/api/evals/suites/${id}`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }),
-  queueEvalRun: (id: string, body: Record<string, unknown>) => request<{ id: string; status: string }>(`/api/evals/suites/${id}/runs`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
-  listEvalRuns: () => request<EvalRun[]>('/api/evals/runs'),
-  getEvalRun: (id: string) => request<{ run: EvalRun; cases: Array<Record<string, unknown>> }>(`/api/evals/runs/${id}`),
-  getEvalRegression: (suiteID: string) => request<Record<string, unknown>>(`/api/evals/suites/${suiteID}/regression`),
+  listEnvironments: () => request<Array<Record<string, unknown>>>('/api/environments'),
+  createEnvironment: (body: Record<string, unknown>) => request<{ id: string }>('/api/environments', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
+  updateEnvironment: (id: string, body: Record<string, unknown>) => request<{ id: string }>(`/api/environments/${id}`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }),
+  deleteEnvironment: (id: string) => request<{ deleted: boolean }>(`/api/environments/${id}`, { method: 'DELETE' }),
+  listCredentialVaults: () => request<Array<Record<string, unknown>>>('/api/credential-vaults'),
+  createCredentialVault: (body: Record<string, unknown>) => request<{ id: string }>('/api/credential-vaults', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
+  updateCredentialVault: (id: string, body: Record<string, unknown>) => request<{ id: string }>(`/api/credential-vaults/${id}`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }),
+  deleteCredentialVault: (id: string) => request<{ deleted: boolean }>(`/api/credential-vaults/${id}`, { method: 'DELETE' }),
+  listCredentialVaultItems: (id: string) => request<Array<Record<string, unknown>>>(`/api/credential-vaults/${id}/items`),
+  upsertCredentialVaultItem: (id: string, body: { secret_name: string; alias?: string }) =>
+    request<{ vault_id: string; secret_name: string }>(`/api/credential-vaults/${id}/items`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
+  deleteCredentialVaultItem: (id: string, secretName: string) =>
+    request<{ deleted: boolean }>(`/api/credential-vaults/${id}/items/${encodeURIComponent(secretName)}`, { method: 'DELETE' }),
 }

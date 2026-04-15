@@ -9,6 +9,12 @@ CREATE TABLE IF NOT EXISTS agents (
   model TEXT NOT NULL,
   system_prompt TEXT NOT NULL DEFAULT '',
   allowed_tools TEXT NOT NULL DEFAULT '[]',
+  starter_prompts TEXT NOT NULL DEFAULT '[]',
+  default_task TEXT NOT NULL DEFAULT '',
+  default_max_steps INTEGER NOT NULL DEFAULT 30,
+  default_workspace_path TEXT NOT NULL DEFAULT '',
+  default_environment_id TEXT NOT NULL DEFAULT '',
+  default_credential_vault_id TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -22,6 +28,8 @@ CREATE TABLE IF NOT EXISTS runs (
   provider TEXT NOT NULL,
   model TEXT NOT NULL,
   max_steps INTEGER NOT NULL DEFAULT 30,
+  environment_id TEXT NOT NULL DEFAULT '',
+  credential_vault_id TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   started_at TEXT,
@@ -144,12 +152,33 @@ CREATE TABLE IF NOT EXISTS provider_configs (
   updated_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS evaluations (
+CREATE TABLE IF NOT EXISTS environments (
   id TEXT PRIMARY KEY,
-  run_id TEXT NOT NULL,
-  metric TEXT NOT NULL,
-  value REAL NOT NULL,
-  notes TEXT NOT NULL DEFAULT '',
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  config_json TEXT NOT NULL DEFAULT '{}',
+  enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
-  FOREIGN KEY(run_id) REFERENCES runs(id)
+  updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS credential_vaults (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS credential_vault_items (
+  id TEXT PRIMARY KEY,
+  vault_id TEXT NOT NULL,
+  secret_name TEXT NOT NULL,
+  alias TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(vault_id, secret_name),
+  FOREIGN KEY(vault_id) REFERENCES credential_vaults(id) ON DELETE CASCADE,
+  FOREIGN KEY(secret_name) REFERENCES secrets(name) ON DELETE CASCADE
+);
+

@@ -6,6 +6,10 @@ export type Agent = {
   model: string
   system_prompt: string
   allowed_tools: string[]
+  starter_prompts: string[]
+  default_task: string
+  default_max_steps: number
+  default_workspace_path: string
   created_at: string
   updated_at: string
 }
@@ -19,6 +23,8 @@ export type Run = {
   provider: string
   model: string
   max_steps: number
+  environment_id: string
+  credential_vault_id: string
   created_at: string
   updated_at: string
   started_at?: string
@@ -116,44 +122,4 @@ export type RunTelemetry = {
     payload_json: string
     created_at: string
   }>
-}
-
-export type EvalCase = {
-  id: string
-  name: string
-  task: string
-  assertion_json: string
-  position: number
-  created_at: string
-  updated_at: string
-}
-
-export type EvalSuite = {
-  id: string
-  name: string
-  description: string
-  agent_id: string
-  created_at: string
-  updated_at: string
-  case_count?: number
-  latest_status?: string
-  latest_run_at?: string
-}
-
-export type EvalRun = {
-  id: string
-  suite_id: string
-  suite_name?: string
-  status: string
-  provider: string
-  model: string
-  max_steps: number
-  total_cases: number
-  passed_cases: number
-  failed_cases: number
-  created_at: string
-  started_at?: string
-  completed_at?: string
-  summary_json: string
-  error?: string
 }

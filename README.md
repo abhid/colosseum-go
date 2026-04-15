@@ -1,6 +1,6 @@
 # colosseum
 
-`colosseum` is a self-hosted agent runtime and operations console for autonomous coding and web/ops workflows.
+`colosseum` is a self-hosted agent runtime and operations console for autonomous coding and web/ops sessions.
 
 It combines:
 
@@ -38,10 +38,12 @@ make build
 
 OPENAI_API_KEY=... \
 ANTHROPIC_API_KEY=... \
-./bin/colosseum server --listen-ip 127.0.0.1 --port 8080
+./bin/colosseum server --port 8080
 ```
 
 Then open `http://127.0.0.1:8080`.
+
+`colosseum` listens on all interfaces (`0.0.0.0`) by default. Environment variables can be set inline (as above) or in `.env`/`.env.local` files.
 
 ## Documentation
 
@@ -75,7 +77,6 @@ colosseum/
     config                  # env/flag parsing
     db                      # SQLite schema + migrations
     docker                  # docker lifecycle helpers
-    evals                   # evaluation suites/runs
     policy                  # tool policy and approval gating
     providers               # OpenAI/Anthropic adapters
     runtime                 # orchestration loop

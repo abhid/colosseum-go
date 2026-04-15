@@ -1,132 +1,47 @@
-import { useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { Card, EmptyState, SectionTitle } from '../components/Common'
 import type { ToolDef } from '../lib/types'
 
-const defaultSchema = '{"type":"object","properties":{}}'
-
 export function ToolsPage() {
-  const qc = useQueryClient()
   const toolsQuery = useQuery({ queryKey: ['tools'], queryFn: api.listTools, refetchInterval: 3000 })
-  const [workspacePath, setWorkspacePath] = useState('')
-  const [testInput, setTestInput] = useState('{}')
-  const [testOutput, setTestOutput] = useState('')
-  const [editingId, setEditingId] = useState('')
-  const [form, setForm] = useState({ name: '', description: '', kind: 'shell_command', input_schema: defaultSchema, config_json: '{"command_template":"echo hello","timeout_seconds":120}', enabled: true })
-
-  const createTool = useMutation({
-    mutationFn: () => api.createTool({
-      name: form.name,
-      description: form.description,
-      kind: form.kind,
-      input_schema: JSON.parse(form.input_schema),
-      config_json: JSON.parse(form.config_json),
-      enabled: form.enabled,
-    }),
-    onSuccess: () => {
-      setForm({ name: '', description: '', kind: 'shell_command', input_schema: defaultSchema, config_json: '{"command_template":"echo hello","timeout_seconds":120}', enabled: true })
-      qc.invalidateQueries({ queryKey: ['tools'] })
-    },
-  })
-
-  const updateTool = useMutation({
-    mutationFn: (id: string) => api.updateTool(id, {
-      name: form.name,
-      description: form.description,
-      kind: form.kind,
-      input_schema: JSON.parse(form.input_schema),
-      config_json: JSON.parse(form.config_json),
-      enabled: form.enabled,
-    }),
-    onSuccess: () => {
-      setEditingId('')
-      qc.invalidateQueries({ queryKey: ['tools'] })
-    },
-  })
-
-  const deleteTool = useMutation({
-    mutationFn: (id: string) => api.deleteTool(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tools'] }),
-  })
-
-  const testTool = useMutation({
-    mutationFn: (id: string) => api.testTool(id, { workspace_path: workspacePath, input: JSON.parse(testInput) }),
-    onSuccess: (res) => setTestOutput(JSON.stringify(res, null, 2)),
-    onError: (err) => setTestOutput(String(err)),
-  })
 
   const defs = useMemo(() => (toolsQuery.data ?? []) as ToolDef[], [toolsQuery.data])
 
   return (
     <div className="space-y-4">
-      <SectionTitle title="Tools Console" subtitle="Create, edit, test, and govern built-in and custom tools." />
+      <SectionTitle title="Tools Console" subtitle="Inspect available tools. Tool extension will move to MCP integrations." />
 
       <Card>
-        <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">{editingId ? 'Edit Tool' : 'Create Custom Tool'}</h3>
-        <div className="grid gap-3 md:grid-cols-2">
-          <input className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" placeholder="Tool name (e.g. repo.scan)" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
-          <input className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" placeholder="Description" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
-          <select className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={form.kind} onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value }))}>
-            <option value="shell_command">shell_command</option>
-            <option value="builtin">builtin</option>
-          </select>
-          <label className="flex items-center gap-2 text-sm text-gray-700">
-            <input type="checkbox" className="rounded border-gray-300 text-gray-900 focus:ring-gray-900" checked={form.enabled} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} /> Enabled
-          </label>
-        </div>
-        <textarea className="mt-3 h-28 w-full rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-xs focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={form.input_schema} onChange={(e) => setForm((f) => ({ ...f, input_schema: e.target.value }))} />
-        <textarea className="mt-3 h-28 w-full rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-xs focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={form.config_json} onChange={(e) => setForm((f) => ({ ...f, config_json: e.target.value }))} />
-        <div className="mt-4 flex gap-2">
-          <button className="h-9 rounded-md bg-gray-900 px-4 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50" onClick={() => (editingId ? updateTool.mutate(editingId) : createTool.mutate())}>{editingId ? 'Save Tool' : 'Create Tool'}</button>
-          {editingId ? <button className="h-9 rounded-md border border-gray-300 px-4 text-sm transition-colors hover:bg-gray-50" onClick={() => setEditingId('')}>Cancel</button> : null}
+        <h3 className="mb-2 text-sm font-semibold tracking-tight text-gray-900">Tool Management</h3>
+        <p className="text-sm text-gray-600">
+          Custom tool authoring is intentionally disabled in-app. Use MCP server integrations for extending tool capabilities.
+        </p>
+        <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
+          Future direction: external MCP servers as the primary extension surface.
         </div>
       </Card>
 
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Registered Tools</h3>
-        {defs.length === 0 ? <EmptyState title="No tools" body="Create your first custom tool." /> : (
+        {defs.length === 0 ? <EmptyState title="No tools" body="No tools are registered in this runtime." /> : (
           <div className="space-y-3">
             {defs.map((t) => (
-              <div key={t.id} className="group rounded-lg border border-gray-200 p-4 transition-colors hover:border-gray-300">
+              <div key={t.id} className="rounded-lg border border-gray-200 p-4 transition-colors hover:border-gray-300">
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-sm font-semibold text-gray-900">{t.name}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">{t.kind} | {t.is_builtin ? 'builtin' : 'custom'} | {t.enabled ? 'enabled' : 'disabled'}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {t.kind} | {t.enabled ? 'enabled' : 'disabled'}
+                    </p>
                     <p className="mt-2 text-sm text-gray-700">{t.description}</p>
-                  </div>
-                  <div className="flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
-                    <button
-                      className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100"
-                      onClick={() => {
-                        setEditingId(t.id)
-                        setForm({
-                          name: t.name,
-                          description: t.description,
-                          kind: t.kind,
-                          input_schema: JSON.stringify(t.input_schema ?? {}, null, 2),
-                          config_json: JSON.stringify(t.config_json ?? {}, null, 2),
-                          enabled: t.enabled,
-                        })
-                      }}
-                    >
-                      Edit
-                    </button>
-                    {!t.is_builtin ? <button className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50" onClick={() => deleteTool.mutate(t.id)}>Delete</button> : null}
-                    <button className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100" onClick={() => testTool.mutate(t.id)}>Test</button>
                   </div>
                 </div>
               </div>
             ))}
           </div>
         )}
-      </Card>
-
-      <Card>
-        <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Tool Test Runner</h3>
-        <input className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" placeholder="Workspace path" value={workspacePath} onChange={(e) => setWorkspacePath(e.target.value)} />
-        <textarea className="mt-3 h-24 w-full rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-xs focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={testInput} onChange={(e) => setTestInput(e.target.value)} />
-        <pre className="mt-3 max-h-72 overflow-auto rounded bg-gray-900 p-4 font-mono text-xs text-gray-100">{testOutput || 'Run a test to inspect output...'}</pre>
       </Card>
     </div>
   )
