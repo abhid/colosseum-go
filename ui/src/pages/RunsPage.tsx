@@ -7,7 +7,7 @@ import { Card, EmptyState, SectionTitle, StatusBadge } from '../components/Commo
 export function RunsPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const [form, setForm] = useState({ agent_id: '', task: '', workspace_path: '', source_workspace_path: '' })
+  const [form, setForm] = useState({ agent_id: '', task: '' })
 
   const agents = useQuery({ queryKey: ['agents'], queryFn: api.listAgents })
   const runs = useQuery({ queryKey: ['runs'], queryFn: api.listRuns, refetchInterval: 2000 })
@@ -27,19 +27,21 @@ export function RunsPage() {
       <SectionTitle title="Runs" subtitle="Submit and monitor long-running agent tasks." />
       <Card>
         <h3 className="mb-3 text-sm font-semibold tracking-tight">Create Run</h3>
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-2">
           <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" value={form.agent_id} onChange={(e) => setForm((f) => ({ ...f, agent_id: e.target.value }))}>
             <option value="">Select agent</option>
             {(agents.data ?? []).map((a) => (
               <option key={a.id} value={a.id}>{a.name} ({a.provider}:{a.model})</option>
             ))}
           </select>
-          <input className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Workspace path (optional; auto-managed if blank)" value={form.workspace_path} onChange={(e) => setForm((f) => ({ ...f, workspace_path: e.target.value }))} />
-          <button className="h-9 rounded-md bg-indigo-600 px-3 text-sm font-medium text-white disabled:opacity-50" disabled={createRun.isPending} onClick={() => createRun.mutate(form)}>
+          <button
+            className="h-9 rounded-md bg-indigo-600 px-3 text-sm font-medium text-white disabled:opacity-50"
+            disabled={createRun.isPending}
+            onClick={() => createRun.mutate({ agent_id: form.agent_id, task: form.task })}
+          >
             {createRun.isPending ? 'Creating...' : 'Start Run'}
           </button>
         </div>
-        <input className="mt-3 h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Seed from existing workspace path (optional)" value={form.source_workspace_path} onChange={(e) => setForm((f) => ({ ...f, source_workspace_path: e.target.value }))} />
         <textarea className="mt-3 min-h-[96px] w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm" placeholder="Task" value={form.task} onChange={(e) => setForm((f) => ({ ...f, task: e.target.value }))} />
         {createRun.error ? <p className="mt-2 text-sm text-rose-700">{String(createRun.error)}</p> : null}
       </Card>

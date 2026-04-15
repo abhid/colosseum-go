@@ -164,6 +164,10 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 	}
 
 	messages := []providers.Message{{Role: "user", Content: task}}
+	lastEventSeq := 0
+	if err := m.appendPendingUserMessages(ctx, runID, &messages, &lastEventSeq); err != nil {
+		return m.failRun(ctx, runID, fmt.Errorf("load user events: %w", err))
+	}
 	var replaySourceRunID string
 	var replayFromStep int
 	_ = m.DB.QueryRowContext(ctx, `SELECT COALESCE(replay_source_run_id,''), COALESCE(replay_from_step,1) FROM runs WHERE id=?`, runID).Scan(&replaySourceRunID, &replayFromStep)
@@ -183,6 +187,8 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 			"replayed_steps":   replayed,
 		})
 	}
+	var existingStepMax int
+	_ = m.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(idx),0) FROM run_steps WHERE run_id=?`, runID).Scan(&existingStepMax)
 	toolDefs, err := tools.ListDefinitions(ctx, m.DB, false)
 	if err != nil {
 		return m.failRun(ctx, runID, fmt.Errorf("list tools: %w", err))
@@ -202,9 +208,13 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 			_ = m.Store.AppendEvent(ctx, runID, "", "run.stopped", map[string]any{"status": status})
 			return nil
 		}
+		if err := m.appendPendingUserMessages(ctx, runID, &messages, &lastEventSeq); err != nil {
+			return m.failRun(ctx, runID, fmt.Errorf("load user events: %w", err))
+		}
+		stepIdx := existingStepMax + step
 		stepID := uuid.NewString()
 		modelSpanID := uuid.NewString()
-		if _, err := m.DB.ExecContext(ctx, `INSERT INTO run_steps(id,run_id,idx,step_type,status,input_json,created_at,started_at) VALUES(?,?,?,?,?,?,?,?)`, stepID, runID, step, "model", "running", `{"message_count":`+fmt.Sprintf("%d", len(messages))+`}`, now(), now()); err != nil {
+		if _, err := m.DB.ExecContext(ctx, `INSERT INTO run_steps(id,run_id,idx,step_type,status,input_json,created_at,started_at) VALUES(?,?,?,?,?,?,?,?)`, stepID, runID, stepIdx, "model", "running", `{"message_count":`+fmt.Sprintf("%d", len(messages))+`}`, now(), now()); err != nil {
 			return m.failRun(ctx, runID, err)
 		}
 		_, _ = m.DB.ExecContext(ctx, `INSERT INTO trace_spans(id,run_id,parent_id,name,kind,status,started_at,attrs_json) VALUES(?,?,?,?,?,?,?,?)`, modelSpanID, runID, "", "model.step", "model", "running", now(), `{"step_id":"`+stepID+`"}`)
@@ -380,6 +390,80 @@ func (m *Manager) currentStatus(runID string) (string, error) {
 	return s, err
 }
 
+func (m *Manager) appendPendingUserMessages(ctx context.Context, runID string, messages *[]providers.Message, lastSeq *int) error {
+	for {
+		events, err := m.Store.GetEvents(ctx, runID, *lastSeq, 200)
+		if err != nil {
+			return err
+		}
+		if len(events) == 0 {
+			return nil
+		}
+		for _, ev := range events {
+			seq := asInt(ev["seq"])
+			if seq > *lastSeq {
+				*lastSeq = seq
+			}
+			eventType, _ := ev["event_type"].(string)
+			if eventType != "user.event" {
+				continue
+			}
+			msg := extractUserMessage(ev["payload"])
+			if msg == "" {
+				continue
+			}
+			*messages = append(*messages, providers.Message{Role: "user", Content: msg})
+		}
+		if len(events) < 200 {
+			return nil
+		}
+	}
+}
+
+func asInt(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	default:
+		return 0
+	}
+}
+
+func extractUserMessage(payload any) string {
+	switch raw := payload.(type) {
+	case json.RawMessage:
+		return extractUserMessageFromJSON(raw)
+	case []byte:
+		return extractUserMessageFromJSON(raw)
+	case string:
+		return strings.TrimSpace(raw)
+	default:
+		return ""
+	}
+}
+
+func extractUserMessageFromJSON(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return strings.TrimSpace(string(raw))
+	}
+	for _, key := range []string{"message", "text", "content", "instruction"} {
+		if v, ok := obj[key]; ok {
+			if s := strings.TrimSpace(fmt.Sprint(v)); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
 func buildEffectiveSystemPrompt(base string, allowedTools []string) string {
 	base = strings.TrimSpace(base)
 	if len(allowedTools) == 0 {
@@ -392,10 +476,17 @@ func buildEffectiveSystemPrompt(base string, allowedTools []string) string {
 		"- Do not claim inability to access information when an allowed tool can fetch or verify it.",
 		"- Ground final answers in observed tool output; summarize key evidence succinctly.",
 		"- If a tool attempt fails, briefly report the failure and next best attempt.",
+		"- Treat each run as a one-shot execution whenever feasible: complete the requested deliverable in this run.",
+		"- Do not ask follow-up permission questions like 'want me to continue?' after completing the requested action.",
+		"- If the user requested a concrete output (file, patch, screenshot, report), produce it directly and reference the produced output in the final answer.",
 	}
 	if hasAllowedTool(allowedTools, "shell.exec") {
 		toolPolicy = append(toolPolicy,
 			"- shell.exec is available: use terminal commands to retrieve and validate external data when needed.")
+	}
+	if hasAllowedToolPrefix(allowedTools, "browser.") {
+		toolPolicy = append(toolPolicy,
+			"- browser.* tools are available: when asked for a screenshot or page capture, capture it in-run and return the resulting artifact reference instead of offering additional optional captures.")
 	}
 	policyBlock := strings.Join(toolPolicy, "\n")
 	if base == "" {
@@ -407,6 +498,15 @@ func buildEffectiveSystemPrompt(base string, allowedTools []string) string {
 func hasAllowedTool(allowedTools []string, name string) bool {
 	for _, t := range allowedTools {
 		if strings.TrimSpace(t) == name {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAllowedToolPrefix(allowedTools []string, prefix string) bool {
+	for _, t := range allowedTools {
+		if strings.HasPrefix(strings.TrimSpace(t), prefix) {
 			return true
 		}
 	}

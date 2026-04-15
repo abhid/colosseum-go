@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -99,5 +100,22 @@ func TestValidatePlaywrightVersionMatch(t *testing.T) {
 	}
 	if err := validatePlaywrightVersionMatch("custom/image:dev", "1.59.1"); err != nil {
 		t.Fatalf("expected non-standard tags to skip validation, got %v", err)
+	}
+}
+
+func TestRewriteDockerSessionPath(t *testing.T) {
+	base := filepath.Join(string(filepath.Separator), "tmp", "run", "browser-session")
+	got := rewriteDockerSessionPath("/session/latest.png", base)
+	want := filepath.Join(base, "latest.png")
+	if got != want {
+		t.Fatalf("rewriteDockerSessionPath() = %q, want %q", got, want)
+	}
+	unchanged := rewriteDockerSessionPath("/tmp/other.png", base)
+	if unchanged != "/tmp/other.png" {
+		t.Fatalf("expected non-session path unchanged, got %q", unchanged)
+	}
+	noEscape := rewriteDockerSessionPath("/session/../secrets.txt", base)
+	if !strings.HasPrefix(noEscape, base) {
+		t.Fatalf("expected rewritten path to stay under session dir, got %q", noEscape)
 	}
 }

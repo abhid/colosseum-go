@@ -2,10 +2,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { CheckCircle2, Clock3, Copy, Filter, Layers, PauseCircle, Play, PlayCircle, RefreshCw, RotateCcw, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Clock3, Copy, ExternalLink, Filter, Layers, PauseCircle, Play, PlayCircle, RefreshCw, RotateCcw, ShieldCheck } from 'lucide-react'
 import { api } from '../lib/api'
 import { Card, EmptyState, StatusBadge } from '../components/Common'
-import type { RunTelemetry, ToolCall, TraceSpan } from '../lib/types'
+import type { Artifact, RunTelemetry, ToolCall, TraceSpan } from '../lib/types'
 
 type TabId = 'transcript' | 'debug' | 'events'
 
@@ -19,6 +19,11 @@ type EventRow = {
   actor: ActorLaneId
   duration_ms?: number
   usage_label?: string
+}
+
+type DisplayArtifact = Artifact & {
+  _inline_log?: string
+  _order?: number
 }
 
 type ActorLaneId = 'orchestrator' | 'tools' | 'system' | 'user'
@@ -38,7 +43,6 @@ export function RunDetailPage() {
   const [filterText, setFilterText] = useState('')
   const [steerText, setSteerText] = useState('')
   const [selectedSpan, setSelectedSpan] = useState<TraceSpan | null>(null)
-  const [selectedEvent, setSelectedEvent] = useState<EventRow | null>(null)
   const [selectedToolCallID, setSelectedToolCallID] = useState('')
   const activeActors: ActorLaneId[] = ['orchestrator', 'tools', 'system', 'user']
 
@@ -217,10 +221,16 @@ export function RunDetailPage() {
       if (typeof parsed.result === 'string' && parsed.result.trim()) return parsed.result
       if (typeof parsed.text === 'string' && parsed.text.trim()) return parsed.text
     }
+    const lastModelResponse = [...eventRows].reverse().find((e) => e.event_type === 'model.response')
+    if (lastModelResponse && typeof lastModelResponse.parsed === 'object' && lastModelResponse.parsed !== null) {
+      const parsed = lastModelResponse.parsed as Record<string, unknown>
+      if (typeof parsed.text === 'string' && parsed.text.trim()) return parsed.text
+      if (typeof parsed.result === 'string' && parsed.result.trim()) return parsed.result
+    }
     return ''
   }, [eventRows])
 
-  const displayArtifacts = useMemo(() => {
+  const displayArtifacts = useMemo<DisplayArtifact[]>(() => {
     const persisted = artifactsQ.data ?? []
     if (persisted.length > 0) return persisted
 
@@ -249,6 +259,29 @@ export function RunDetailPage() {
 
     return synthetic
   }, [artifactsQ.data, eventRows])
+
+  const stepArtifactsByStepID = useMemo(() => {
+    const out: Record<string, DisplayArtifact[]> = {}
+    for (const artifact of displayArtifacts) {
+      const stepID = String(artifact.step_id || '')
+      if (!stepID) continue
+      if (!out[stepID]) out[stepID] = []
+      out[stepID].push(artifact)
+    }
+    return out
+  }, [displayArtifacts])
+
+  const finalOutcomeArtifacts = useMemo(() => {
+    const completed = [...eventRows].reverse().find((e) => e.event_type === 'run.completed')
+    const completedStepID = completed?.step_id || ''
+    if (completedStepID && stepArtifactsByStepID[completedStepID]?.length) {
+      return stepArtifactsByStepID[completedStepID]
+    }
+    if (displayArtifacts.length === 0) return []
+    const imageArtifacts = displayArtifacts.filter((a) => a.mime_type.startsWith('image/'))
+    if (imageArtifacts.length > 0) return imageArtifacts.slice(0, 3)
+    return displayArtifacts.slice(0, 3)
+  }, [eventRows, stepArtifactsByStepID, displayArtifacts])
 
   if (!id) return <EmptyState title="Missing run ID" body="Select a run from the runs list." />
 
@@ -296,8 +329,16 @@ export function RunDetailPage() {
           <div className="flex items-start gap-2">
             <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
             <div className="min-w-0">
-              <p className="text-xs font-medium uppercase tracking-wide text-emerald-700">Final Result</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-emerald-700">Run Outcome</p>
               <FinalResultBody value={finalResult} />
+              {finalOutcomeArtifacts.length > 0 ? (
+                <div className="mt-2 space-y-2">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-600">Output Artifacts</p>
+                  {finalOutcomeArtifacts.map((artifact) => (
+                    <StepArtifactCard key={artifact.id} runID={id} artifact={artifact} />
+                  ))}
+                </div>
+              ) : null}
             </div>
           </div>
         </Card>
@@ -389,12 +430,13 @@ export function RunDetailPage() {
 
         {activeTab === 'transcript' ? (
           <TranscriptTab
+            runID={id}
             rows={filteredEvents}
             runStartMs={runStartMs}
             stepIndexByID={stepIndexByID}
+            stepArtifactsByStepID={stepArtifactsByStepID}
             replayPending={replay.isPending}
             onReplayFromStep={(step) => replay.mutate({ resumeFromStep: step })}
-            onSelect={setSelectedEvent}
           />
         ) : null}
 
@@ -410,123 +452,100 @@ export function RunDetailPage() {
         ) : null}
 
         {activeTab === 'events' ? (
-          <EventsTab rows={filteredEvents} onSelect={setSelectedEvent} />
+          <EventsTab rows={filteredEvents} />
         ) : null}
       </Card>
-
-      {(selectedEvent || displayArtifacts.length > 0) ? (
-        <div className="grid gap-4 xl:grid-cols-2">
-          {selectedEvent ? (
-            <Card>
-              <h3 className="mb-3 text-sm font-semibold">Inspector</h3>
-              <div className="space-y-2 text-sm">
-                <p className="font-medium">Event #{selectedEvent.seq} - {selectedEvent.event_type}</p>
-                <p className="text-xs text-slate-500">{new Date(selectedEvent.created_at).toLocaleString()}</p>
-                <pre className="max-h-[380px] overflow-auto rounded-md bg-slate-900 p-3 font-mono text-xs text-slate-100">{JSON.stringify(selectedEvent.parsed, null, 2)}</pre>
-              </div>
-            </Card>
-          ) : null}
-
-          {displayArtifacts.length > 0 ? (
-            <Card>
-              <h3 className="mb-3 text-sm font-semibold">Artifacts</h3>
-              <div className="max-h-[430px] space-y-2 overflow-auto pr-1">
-                {displayArtifacts.map((a) => (
-                  <div key={a.id} className="rounded border border-slate-200 p-2 text-sm">
-                    <div className="flex items-center justify-between">
-                      <p className="font-medium">{a.kind}</p>
-                      {'_inline_log' in a ? (
-                        <button className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-0.5 text-xs" onClick={() => navigator.clipboard.writeText(String((a as { _inline_log: string })._inline_log))}><Copy className="h-3 w-3" />Copy log</button>
-                      ) : (
-                        <button className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-0.5 text-xs" onClick={() => navigator.clipboard.writeText(a.path)}><Copy className="h-3 w-3" />Copy</button>
-                      )}
-                    </div>
-                    <p className="break-all font-mono text-[11px] text-slate-600">{a.path}</p>
-                    <p className="text-xs text-slate-500">{(a.size_bytes / 1024).toFixed(1)} KB</p>
-                    {'_inline_log' in a ? (
-                      <pre className="mt-2 max-h-28 overflow-auto rounded bg-slate-900 p-2 font-mono text-[11px] text-slate-100">{String((a as { _inline_log: string })._inline_log)}</pre>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </Card>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   )
 }
 
 function TranscriptTab({
+  runID,
   rows,
   runStartMs,
   stepIndexByID,
+  stepArtifactsByStepID,
   replayPending,
   onReplayFromStep,
-  onSelect,
 }: {
+  runID: string
   rows: EventRow[]
   runStartMs: number
   stepIndexByID: Record<string, number>
+  stepArtifactsByStepID: Record<string, DisplayArtifact[]>
   replayPending: boolean
   onReplayFromStep: (step: number) => void
-  onSelect: (row: EventRow) => void
 }) {
+  const [expandedRowID, setExpandedRowID] = useState('')
   if (rows.length === 0) return <EmptyState title="No transcript events" body="Events appear while the session runs." />
 
   return (
     <div className="max-h-[560px] space-y-1 overflow-auto pr-1">
       {rows.map((row) => {
+        const expanded = expandedRowID === row.id
         const role = laneMeta[row.actor]
         const line = transcriptLine(row)
         const relativeSince = Number.isFinite(runStartMs) ? formatRelativeSince(runStartMs, row.created_at) : ''
+        const rowArtifacts = stepArtifactsByStepID[row.step_id] ?? []
         const metaItems: ReactNode[] = []
         if (row.duration_ms) metaItems.push(<span key="duration">{formatDuration(row.duration_ms)}</span>)
         if (row.usage_label) metaItems.push(<span key="usage">{row.usage_label}</span>)
         if (relativeSince) metaItems.push(<span key="relative">{relativeSince}</span>)
         return (
-          <button
-            key={row.id}
-            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-slate-300 hover:bg-slate-50"
-            onClick={() => onSelect(row)}
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="mb-0.5 flex items-center gap-1.5">
-                <span className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${role.tone}`}>{role.label}</span>
-                <span className="text-[11px] font-medium text-slate-400">#{row.seq}</span>
-                <span className="truncate text-[12px] font-semibold leading-4 text-slate-800">{line.title}</span>
+          <div key={row.id} className="rounded-md border border-slate-200 bg-white">
+            <button
+              className="w-full px-3 py-2 text-left transition hover:border-slate-300 hover:bg-slate-50"
+              onClick={() => setExpandedRowID(expanded ? '' : row.id)}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="mb-0.5 flex items-center gap-1.5">
+                    <span className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${role.tone}`}>{role.label}</span>
+                    <span className="text-[11px] font-medium text-slate-400">#{row.seq}</span>
+                    <span className="truncate text-[12px] font-semibold leading-4 text-slate-800">{line.title}</span>
+                  </div>
+                  <p className="line-clamp-2 break-all text-[12px] leading-4 text-slate-600">{line.subtitle}</p>
                 </div>
-                <p className="line-clamp-2 break-all text-[12px] leading-4 text-slate-600">{line.subtitle}</p>
-              </div>
-              <div className="shrink-0">
-                <div className="flex items-center gap-1 text-[11px] text-slate-500">
-                  {metaItems.map((item, idx) => (
-                    <span key={`meta-${idx}`} className="inline-flex items-center gap-1">
-                      {idx > 0 ? <span className="text-slate-400">•</span> : null}
-                      {item}
-                    </span>
-                  ))}
-                  {stepIndexByID[row.step_id] && metaItems.length > 0 ? <span className="text-slate-400">•</span> : null}
-                  {stepIndexByID[row.step_id] ? (
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        onReplayFromStep(stepIndexByID[row.step_id])
-                      }}
-                      disabled={replayPending}
-                      className="inline-flex items-center gap-0.5 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                      title={`Restart from step ${stepIndexByID[row.step_id]}`}
-                    >
-                      <RotateCcw className="h-2.5 w-2.5" />
-                      Restart here
-                    </button>
-                  ) : null}
+                <div className="shrink-0">
+                  <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                    {metaItems.map((item, idx) => (
+                      <span key={`meta-${idx}`} className="inline-flex items-center gap-1">
+                        {idx > 0 ? <span className="text-slate-400">•</span> : null}
+                        {item}
+                      </span>
+                    ))}
+                    {stepIndexByID[row.step_id] && metaItems.length > 0 ? <span className="text-slate-400">•</span> : null}
+                    {stepIndexByID[row.step_id] ? (
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          onReplayFromStep(stepIndexByID[row.step_id])
+                        }}
+                        disabled={replayPending}
+                        className="inline-flex items-center gap-0.5 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                        title={`Restart from step ${stepIndexByID[row.step_id]}`}
+                      >
+                        <RotateCcw className="h-2.5 w-2.5" />
+                        Restart here
+                      </button>
+                    ) : null}
+                    <ChevronDown className={`ml-1 h-3.5 w-3.5 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+                  </div>
                 </div>
               </div>
-            </div>
-          </button>
+            </button>
+            {expanded ? (
+              <div className="space-y-3 border-t border-slate-200 bg-slate-50/60 px-3 py-3">
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-slate-700">Inspector</p>
+                  <p className="text-[11px] text-slate-500">{humanizeEventType(row.event_type)} • {new Date(row.created_at).toLocaleString()}</p>
+                  <pre className="max-h-64 overflow-auto rounded-md bg-slate-900 p-2 font-mono text-[11px] text-slate-100">{JSON.stringify(row.parsed, null, 2)}</pre>
+                </div>
+                <StepArtifacts runID={runID} artifacts={rowArtifacts} />
+              </div>
+            ) : null}
+          </div>
         )
       })}
     </div>
@@ -627,7 +646,7 @@ function DebugTab({
   )
 }
 
-function EventsTab({ rows, onSelect }: { rows: EventRow[]; onSelect: (row: EventRow) => void }) {
+function EventsTab({ rows }: { rows: EventRow[] }) {
   if (rows.length === 0) return <EmptyState title="No events" body="No events match your current filter." />
   return (
     <div className="max-h-[540px] overflow-auto">
@@ -642,7 +661,7 @@ function EventsTab({ rows, onSelect }: { rows: EventRow[]; onSelect: (row: Event
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.id} className="cursor-pointer border-b border-slate-100 hover:bg-slate-50" onClick={() => onSelect(row)}>
+            <tr key={row.id} className="border-b border-slate-100">
               <td className="w-12 py-2">{row.seq}</td>
               <td className="w-44 truncate py-2 font-medium">{row.event_type}</td>
               <td className="w-24 py-2 text-slate-600">{new Date(row.created_at).toLocaleTimeString()}</td>
@@ -651,6 +670,63 @@ function EventsTab({ rows, onSelect }: { rows: EventRow[]; onSelect: (row: Event
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+function StepArtifacts({ runID, artifacts }: { runID: string; artifacts: DisplayArtifact[] }) {
+  if (artifacts.length === 0) return <p className="text-[11px] text-slate-500">No artifacts for this step.</p>
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-slate-700">Artifacts ({artifacts.length})</p>
+      {artifacts.map((artifact) => (
+        <StepArtifactCard key={artifact.id} runID={runID} artifact={artifact} />
+      ))}
+    </div>
+  )
+}
+
+function StepArtifactCard({ runID, artifact }: { runID: string; artifact: DisplayArtifact }) {
+  const hasInlineLog = typeof artifact._inline_log === 'string'
+  const isImage = !hasInlineLog && artifact.mime_type.startsWith('image/')
+  const contentURL = !hasInlineLog ? api.getRunArtifactContentURL(runID, artifact.id) : ''
+  return (
+    <div className="rounded border border-slate-200 bg-white p-2 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-medium">{artifact.kind}</p>
+        <div className="flex items-center gap-1">
+          {hasInlineLog ? (
+            <button
+              className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-0.5 text-xs"
+              onClick={() => navigator.clipboard.writeText(String(artifact._inline_log || ''))}
+            >
+              <Copy className="h-3 w-3" />
+              Copy log
+            </button>
+          ) : (
+            <>
+              <button className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-0.5 text-xs" onClick={() => navigator.clipboard.writeText(artifact.path)}>
+                <Copy className="h-3 w-3" />
+                Copy path
+              </button>
+              <a href={contentURL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50">
+                <ExternalLink className="h-3 w-3" />
+                Open
+              </a>
+            </>
+          )}
+        </div>
+      </div>
+      <p className="break-all font-mono text-[11px] text-slate-600">{artifact.path}</p>
+      <p className="text-[11px] text-slate-500">{(artifact.size_bytes / 1024).toFixed(1)} KB</p>
+      {hasInlineLog ? (
+        <pre className="mt-2 max-h-36 overflow-auto rounded bg-slate-900 p-2 font-mono text-[11px] text-slate-100">{String(artifact._inline_log)}</pre>
+      ) : null}
+      {isImage ? (
+        <a href={contentURL} target="_blank" rel="noreferrer" className="mt-2 block rounded border border-slate-200 bg-slate-50 p-1">
+          <img src={contentURL} alt={artifact.kind} className="max-h-72 w-full rounded object-contain" loading="lazy" />
+        </a>
+      ) : null}
     </div>
   )
 }

@@ -5,8 +5,21 @@ const jsonHeaders = { 'Content-Type': 'application/json' }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init)
   if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || `Request failed: ${res.status}`)
+    const raw = await res.text()
+    let message = raw
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as Record<string, unknown>
+        if (typeof parsed.error === 'string' && parsed.error.trim()) {
+          message = parsed.error
+        } else if (typeof parsed.message === 'string' && parsed.message.trim()) {
+          message = parsed.message
+        }
+      } catch {
+        // Keep raw response text as message.
+      }
+    }
+    throw new Error(message || `Request failed: ${res.status}`)
   }
   return res.json() as Promise<T>
 }
@@ -16,7 +29,8 @@ export const api = {
   createAgent: (body: Partial<Agent>) => request<{ id: string }>('/api/agents', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
   updateAgent: (id: string, body: Partial<Agent>) =>
     request<{ id: string }>(`/api/agents/${id}`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }),
-  deleteAgent: (id: string) => request<{ deleted: boolean }>(`/api/agents/${id}`, { method: 'DELETE' }),
+  deleteAgent: (id: string, force = false) =>
+    request<{ deleted: boolean; deleted_runs?: number }>(`/api/agents/${id}${force ? '?force=1' : ''}`, { method: 'DELETE' }),
   listTools: () => request<ToolDef[]>('/api/tools'),
   listProviders: () => request<ProviderInfo[]>('/api/providers'),
   listOpenAIModels: () => request<string[]>('/api/providers/openai/models'),
@@ -36,6 +50,7 @@ export const api = {
     request<{ id: string; status: string }>(`/api/runs/${id}/replay`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
   getRunTrace: (id: string) => request<RunEvent[]>(`/api/runs/${id}/trace`),
   getRunArtifacts: (id: string) => request<Artifact[]>(`/api/runs/${id}/artifacts`),
+  getRunArtifactContentURL: (runID: string, artifactID: string) => `/api/runs/${runID}/artifacts/${artifactID}/content`,
   cancelRun: (id: string) => request<{ status: string }>(`/api/runs/${id}/cancel`, { method: 'POST' }),
   approveRun: (id: string) => request<{ status: string }>(`/api/runs/${id}/approve`, { method: 'POST' }),
   interruptRun: (id: string) => request<{ status: string }>(`/api/runs/${id}/interrupt`, { method: 'POST' }),

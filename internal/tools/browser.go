@@ -308,7 +308,12 @@ func (e *Executor) runBrowserScriptDocker(ctx context.Context, runCtx Context, p
 	if err != nil {
 		return browserActionResult{}, fmt.Errorf("docker browser exec failed: %s", string(out))
 	}
-	return parseBrowserScriptOutput(out)
+	res, err := parseBrowserScriptOutput(out)
+	if err != nil {
+		return browserActionResult{}, err
+	}
+	res.Screenshot = rewriteDockerSessionPath(res.Screenshot, absSessionDir)
+	return res, nil
 }
 
 func (e *Executor) runBrowserScriptLocal(ctx context.Context, runCtx Context, params browserScriptParams) (browserActionResult, error) {
@@ -435,6 +440,24 @@ func parsePlaywrightImageVersion(image string) string {
 		}
 	}
 	return tag
+}
+
+func rewriteDockerSessionPath(pathValue, absSessionDir string) string {
+	pathValue = strings.TrimSpace(pathValue)
+	if pathValue == "" {
+		return ""
+	}
+	const dockerSessionPrefix = "/session/"
+	if !strings.HasPrefix(pathValue, dockerSessionPrefix) {
+		return pathValue
+	}
+	rel := strings.TrimPrefix(pathValue, dockerSessionPrefix)
+	rel = filepath.Clean(string(filepath.Separator) + rel)
+	if rel == "." || rel == string(filepath.Separator) || rel == "" {
+		return pathValue
+	}
+	rel = strings.TrimPrefix(rel, string(filepath.Separator))
+	return filepath.Join(absSessionDir, rel)
 }
 
 func parseBrowserScriptOutput(out []byte) (browserActionResult, error) {

@@ -32,8 +32,24 @@ export function AgentsPage() {
     allowed_tools: [] as string[],
   })
   const [createToolsInitialized, setCreateToolsInitialized] = useState(false)
+  const [createProviderModelInput, setCreateProviderModelInput] = useState('')
   const [editId, setEditId] = useState('')
   const [editForm, setEditForm] = useState({ name: '', description: '', provider: '', model: '', system_prompt: '', allowed_tools: [] as string[] })
+  const [editProviderModelInput, setEditProviderModelInput] = useState('')
+  const [deleteError, setDeleteError] = useState('')
+  const providerModelSuggestions = useMemo(() => {
+    const out: string[] = []
+    for (const provider of providerIDs) {
+      if (provider === 'openai' && openAIModels.length > 0) {
+        for (const model of openAIModels) {
+          out.push(formatProviderModel(provider, model))
+        }
+        continue
+      }
+      out.push(formatProviderModel(provider, ''))
+    }
+    return Array.from(new Set(out))
+  }, [providerIDs, openAIModels])
 
   useEffect(() => {
     if (providerIDs.length === 0) {
@@ -49,6 +65,11 @@ export function AgentsPage() {
   }, [providerIDs, openAIModels, form.provider, form.model])
 
   useEffect(() => {
+    if (createProviderModelInput.trim()) return
+    setCreateProviderModelInput(formatProviderModel(form.provider, form.model))
+  }, [form.provider, form.model, createProviderModelInput])
+
+  useEffect(() => {
     if (createToolsInitialized) return
     if (availableTools.length === 0) return
     setForm((f) => ({ ...f, allowed_tools: availableTools.map((t) => t.name) }))
@@ -59,6 +80,7 @@ export function AgentsPage() {
     mutationFn: api.createAgent,
     onSuccess: () => {
       setForm((f) => ({ ...f, name: '', description: '', system_prompt: '' }))
+      setCreateProviderModelInput('')
       qc.invalidateQueries({ queryKey: ['agents'] })
     },
   })
@@ -72,8 +94,9 @@ export function AgentsPage() {
     },
   })
   const deleteAgent = useMutation({
-    mutationFn: (id: string) => api.deleteAgent(id),
+    mutationFn: (payload: { id: string; force?: boolean }) => api.deleteAgent(payload.id, payload.force ?? false),
     onSuccess: () => {
+      setDeleteError('')
       if (editId) setEditId('')
       qc.invalidateQueries({ queryKey: ['agents'] })
     },
@@ -92,37 +115,32 @@ export function AgentsPage() {
       <SectionTitle title="Agents" subtitle="Define reusable model+tool profiles." />
       <Card>
         <h3 className="mb-3 text-sm font-semibold tracking-tight">Create Agent</h3>
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-3">
           <input className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Agent name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
           <input className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Description" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
-          <select
+          <input
+            list="provider-model-suggestions"
             className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm"
-            value={form.provider}
+            placeholder="OpenAI/gpt-5.4 or Anthropic/claude-3-5-sonnet-latest"
+            value={createProviderModelInput}
             onChange={(e) => {
-              const provider = e.target.value
-              setForm((f) => ({
-                ...f,
-                provider,
-                model: provider === 'openai' ? pickPreferredOpenAIModel(openAIModels, f.model) : f.model,
-              }))
+              const next = e.target.value
+              setCreateProviderModelInput(next)
+              const parsed = parseProviderModelInput(next, providerIDs, form.provider || providerIDs[0] || '')
+              setForm((f) => ({ ...f, provider: parsed.provider, model: parsed.model }))
             }}
-          >
-            {providerIDs.map((provider) => (
-              <option key={provider} value={provider}>{provider}</option>
-            ))}
-          </select>
-          {form.provider === 'openai' && openAIModels.length > 0 ? (
-            <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" value={form.model} onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}>
-              {openAIModels.map((model) => <option key={model} value={model}>{model}</option>)}
-            </select>
-          ) : (
-            <input className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Model" value={form.model} onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))} />
-          )}
+            onBlur={() => setCreateProviderModelInput(formatProviderModel(form.provider, form.model))}
+          />
         </div>
+        <datalist id="provider-model-suggestions">
+          {providerModelSuggestions.map((option) => (
+            <option key={option} value={option} />
+          ))}
+        </datalist>
         <div className="relative mt-3">
           <textarea className="h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 pr-28 text-sm" placeholder="System prompt" value={form.system_prompt} onChange={(e) => setForm((f) => ({ ...f, system_prompt: e.target.value }))} />
           <button
-            className="absolute bottom-2 right-2 inline-flex h-7 items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 text-xs font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+            className="absolute bottom-3 right-3 inline-flex h-7 items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 text-xs font-medium text-amber-800 shadow-sm hover:bg-amber-100 disabled:opacity-50"
             disabled={!form.provider || enhanceCreatePrompt.isPending}
             onClick={() => enhanceCreatePrompt.mutate()}
             type="button"
@@ -149,43 +167,36 @@ export function AgentsPage() {
 
       <Card>
         <h3 className="mb-3 text-sm font-semibold tracking-tight">Agent Definitions</h3>
+        {deleteError ? (
+          <p className="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{deleteError}</p>
+        ) : null}
         {(agents.data ?? []).length === 0 ? <EmptyState title="No agents" body="Create an agent profile to start runs." /> : (
           <div className="space-y-2">
             {(agents.data ?? []).map((a) => (
               <div key={a.id} className="rounded border border-slate-200 p-3">
                 {editId === a.id ? (
                   <div className="space-y-2">
-                    <div className="grid gap-2 md:grid-cols-2">
+                    <div className="grid gap-2">
                       <input className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
                       <input className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" value={editForm.description} onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))} />
-                      <select
+                      <input
+                        list="provider-model-suggestions"
                         className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm"
-                        value={editForm.provider}
+                        placeholder="OpenAI/gpt-5.4 or Anthropic/claude-3-5-sonnet-latest"
+                        value={editProviderModelInput}
                         onChange={(e) => {
-                          const provider = e.target.value
-                          setEditForm((f) => ({
-                            ...f,
-                            provider,
-                            model: provider === 'openai' ? pickPreferredOpenAIModel(openAIModels, f.model) : f.model,
-                          }))
+                          const next = e.target.value
+                          setEditProviderModelInput(next)
+                          const parsed = parseProviderModelInput(next, providerIDs, editForm.provider || providerIDs[0] || '')
+                          setEditForm((f) => ({ ...f, provider: parsed.provider, model: parsed.model }))
                         }}
-                      >
-                        {providerIDs.map((provider) => (
-                          <option key={provider} value={provider}>{provider}</option>
-                        ))}
-                      </select>
-                      {editForm.provider === 'openai' && openAIModels.length > 0 ? (
-                        <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" value={editForm.model} onChange={(e) => setEditForm((f) => ({ ...f, model: e.target.value }))}>
-                          {openAIModels.map((model) => <option key={model} value={model}>{model}</option>)}
-                        </select>
-                      ) : (
-                        <input className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" value={editForm.model} onChange={(e) => setEditForm((f) => ({ ...f, model: e.target.value }))} />
-                      )}
+                        onBlur={() => setEditProviderModelInput(formatProviderModel(editForm.provider, editForm.model))}
+                      />
                     </div>
                     <div className="relative">
                       <textarea className="h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 pr-28 text-sm" value={editForm.system_prompt} onChange={(e) => setEditForm((f) => ({ ...f, system_prompt: e.target.value }))} />
                       <button
-                        className="absolute bottom-2 right-2 inline-flex h-7 items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 text-xs font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                        className="absolute bottom-3 right-3 inline-flex h-7 items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 text-xs font-medium text-amber-800 shadow-sm hover:bg-amber-100 disabled:opacity-50"
                         disabled={!editForm.provider || enhanceEditPrompt.isPending}
                         onClick={() => enhanceEditPrompt.mutate()}
                         type="button"
@@ -243,6 +254,7 @@ export function AgentsPage() {
                               system_prompt: a.system_prompt,
                               allowed_tools: a.allowed_tools ?? [],
                             })
+                            setEditProviderModelInput(formatProviderModel(a.provider, a.model))
                           }}
                           aria-label="Edit agent"
                           title="Edit agent"
@@ -251,10 +263,32 @@ export function AgentsPage() {
                         </button>
                         <button
                           className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-rose-300 text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-                          onClick={() => {
+                          onClick={async () => {
                             const ok = window.confirm(`Delete agent "${a.name}"?`)
                             if (!ok) return
-                            deleteAgent.mutate(a.id)
+                            setDeleteError('')
+                            try {
+                              await deleteAgent.mutateAsync({ id: a.id })
+                            } catch (err) {
+                              const message = err instanceof Error ? err.message : 'Failed to delete agent'
+                              if (message.includes('agent has runs')) {
+                                const force = window.confirm(
+                                  `Agent "${a.name}" has runs.\n\nForce delete will permanently remove all runs and run history for this agent.\n\nContinue?`,
+                                )
+                                if (!force) {
+                                  setDeleteError(message)
+                                  return
+                                }
+                                try {
+                                  await deleteAgent.mutateAsync({ id: a.id, force: true })
+                                } catch (forceErr) {
+                                  const forceMessage = forceErr instanceof Error ? forceErr.message : 'Failed to force delete agent'
+                                  setDeleteError(forceMessage)
+                                }
+                                return
+                              }
+                              setDeleteError(message)
+                            }
                           }}
                           disabled={deleteAgent.isPending}
                           aria-label="Delete agent"
@@ -304,7 +338,7 @@ function ToolSelectorAccordion({
   }, [filtered])
 
   return (
-    <details className="mt-3 rounded-md border border-slate-200 bg-slate-50/50 p-2" open>
+    <details className="mt-3 rounded-md border border-slate-200 bg-slate-50/50 p-2">
       <summary className="cursor-pointer select-none text-sm font-medium text-slate-700">
         {title} ({selected.length} selected)
       </summary>
@@ -356,4 +390,38 @@ function pickPreferredOpenAIModel(models: string[], current: string) {
     if (models.includes(candidate)) return candidate
   }
   return models[0] || trimmedCurrent || 'gpt-5.4'
+}
+
+function providerDisplayName(provider: string) {
+  const normalized = provider.trim().toLowerCase()
+  if (normalized === 'openai') return 'OpenAI'
+  if (normalized === 'anthropic') return 'Anthropic'
+  if (!normalized) return ''
+  return normalized[0].toUpperCase() + normalized.slice(1)
+}
+
+function formatProviderModel(provider: string, model: string) {
+  const p = provider.trim()
+  const m = model.trim()
+  if (!p && !m) return ''
+  const label = providerDisplayName(p || 'openai')
+  if (!m) return `${label}/`
+  return `${label}/${m}`
+}
+
+function parseProviderModelInput(value: string, providerIDs: string[], fallbackProvider: string) {
+  const raw = value.trim()
+  const fallback = fallbackProvider || providerIDs[0] || ''
+  if (!raw) return { provider: fallback, model: '' }
+  const slash = raw.indexOf('/')
+  if (slash < 0) {
+    return { provider: fallback, model: raw }
+  }
+  const providerPart = raw.slice(0, slash).trim().toLowerCase()
+  const modelPart = raw.slice(slash + 1).trim()
+  const matchedProvider =
+    providerIDs.find((p) => p.toLowerCase() === providerPart) ||
+    providerIDs.find((p) => providerDisplayName(p).toLowerCase() === providerPart) ||
+    fallback
+  return { provider: matchedProvider, model: modelPart }
 }

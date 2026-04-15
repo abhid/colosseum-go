@@ -82,6 +82,7 @@ func registerAPIRoutes(
 		r.Get("/runs/{id}/trace", getRunTraceHandler(db))
 		r.Get("/runs/{id}/telemetry", getRunTelemetryHandler(db))
 		r.Get("/runs/{id}/artifacts", getRunArtifactsHandler(db))
+		r.Get("/runs/{id}/artifacts/{artifactID}/content", getRunArtifactContentHandler(db))
 		r.Get("/runs/{id}/export", exportRunBundleHandler(db))
 		r.Post("/runs/{id}/cancel", updateRunStatusHandler(db, "cancelled"))
 		r.Post("/runs/{id}/approve", approveLatestHandler(db))
@@ -146,6 +147,9 @@ Requirements:
 - Define planning and execution behavior.
 - Include explicit input assumptions, output expectations, and failure handling.
 - Include decision rules for when to ask clarifying questions versus acting directly.
+- Bias strongly toward one-shot execution: complete the requested task in one run when feasible.
+- Avoid conversational follow-ups after completion (e.g. "want me to also...") unless the task is blocked or ambiguous.
+- When outputs are requested (artifacts, files, screenshots, patches), require generating them directly and citing the produced output.
 - Include a strong "tool-first for external/current facts" rule when tools are available.
 - Forbid "I cannot access X" responses when an allowed tool can retrieve or verify X.
 - Require concise evidence from tool outputs in final answers whenever tools are used.
@@ -329,14 +333,24 @@ func updateAgentHandler(db *sql.DB) http.HandlerFunc {
 func deleteAgentHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		agentID := chi.URLParam(r, "id")
+		forceDelete := parseTruthy(r.URL.Query().Get("force"))
+		var deletedRuns int64
 		var runCount int
 		if err := db.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM runs WHERE agent_id=?`, agentID).Scan(&runCount); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		if runCount > 0 {
+		if runCount > 0 && !forceDelete {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "agent has runs; cannot delete"})
 			return
+		}
+		if runCount > 0 && forceDelete {
+			n, err := deleteRunsForAgent(r.Context(), db, agentID)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			deletedRuns = n
 		}
 		var suiteCount int
 		if err := db.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM eval_suites WHERE agent_id=?`, agentID).Scan(&suiteCount); err != nil {
@@ -357,8 +371,77 @@ func deleteAgentHandler(db *sql.DB) http.HandlerFunc {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "agent not found"})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "deleted_runs": deletedRuns})
 	}
+}
+
+func deleteRunsForAgent(ctx context.Context, db *sql.DB, agentID string) (int64, error) {
+	rows, err := db.QueryContext(ctx, `SELECT DISTINCT path FROM artifacts WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`, agentID)
+	if err != nil {
+		return 0, fmt.Errorf("query artifact paths: %w", err)
+	}
+	artifactPaths := make([]string, 0)
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			_ = rows.Close()
+			return 0, fmt.Errorf("scan artifact path: %w", err)
+		}
+		if path != "" {
+			artifactPaths = append(artifactPaths, path)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return 0, fmt.Errorf("iterate artifact paths: %w", err)
+	}
+	_ = rows.Close()
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin tx: %w", err)
+	}
+	rollBack := true
+	defer func() {
+		if rollBack {
+			_ = tx.Rollback()
+		}
+	}()
+
+	deleteStatements := []string{
+		`DELETE FROM workflow_runs WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
+		`DELETE FROM evaluations WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
+		`DELETE FROM approvals WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
+		`DELETE FROM containers WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
+		`DELETE FROM artifacts WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
+		`DELETE FROM events WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
+		`DELETE FROM trace_spans WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
+		`DELETE FROM tool_calls WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
+		`DELETE FROM run_steps WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
+	}
+	for _, stmt := range deleteStatements {
+		if _, err := tx.ExecContext(ctx, stmt, agentID); err != nil {
+			return 0, fmt.Errorf("delete run dependencies: %w", err)
+		}
+	}
+	res, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE agent_id=?`, agentID)
+	if err != nil {
+		return 0, fmt.Errorf("delete runs: %w", err)
+	}
+	deletedRuns, _ := res.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit tx: %w", err)
+	}
+	rollBack = false
+
+	for _, artifactPath := range artifactPaths {
+		cleanPath := filepath.Clean(artifactPath)
+		if strings.HasPrefix(cleanPath, "inline://") {
+			continue
+		}
+		_ = os.Remove(cleanPath)
+	}
+	return deletedRuns, nil
 }
 
 func listToolsHandler(db *sql.DB) http.HandlerFunc {
@@ -767,6 +850,54 @@ func getRunArtifactsHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
+func getRunArtifactContentHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		runID := chi.URLParam(r, "id")
+		artifactID := chi.URLParam(r, "artifactID")
+		var path, mime string
+		err := db.QueryRowContext(r.Context(), `SELECT path,mime_type FROM artifacts WHERE run_id=? AND id=?`, runID, artifactID).Scan(&path, &mime)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if strings.HasPrefix(path, "inline://") {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "inline artifacts do not have file content"})
+			return
+		}
+		cleanPath := filepath.Clean(path)
+		info, err := os.Stat(cleanPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "artifact file not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if info.IsDir() {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "artifact path is a directory"})
+			return
+		}
+		content, err := os.ReadFile(cleanPath)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if strings.TrimSpace(mime) == "" {
+			mime = http.DetectContentType(content)
+		}
+		if mime != "" {
+			w.Header().Set("Content-Type", mime)
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(content)
+	}
+}
+
 func updateRunStatusHandler(db *sql.DB, status string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID := chi.URLParam(r, "id")
@@ -815,7 +946,15 @@ func appendRunEventHandler(db *sql.DB) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusCreated, map[string]any{"seq": seq})
+		_, _ = db.ExecContext(
+			r.Context(),
+			`UPDATE runs SET status='queued', completed_at=NULL, error='', updated_at=? WHERE id=? AND status IN ('interrupted','completed','failed','cancelled')`,
+			now,
+			runID,
+		)
+		var status string
+		_ = db.QueryRowContext(r.Context(), `SELECT status FROM runs WHERE id=?`, runID).Scan(&status)
+		writeJSON(w, http.StatusCreated, map[string]any{"seq": seq, "status": status})
 	}
 }
 
@@ -1643,6 +1782,15 @@ func nextEventSeq(db *sql.DB, runID string) int {
 	var max sql.NullInt64
 	_ = db.QueryRow(`SELECT COALESCE(MAX(seq),0) FROM events WHERE run_id=?`, runID).Scan(&max)
 	return int(max.Int64) + 1
+}
+
+func parseTruthy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func copyDirectory(source, target string) error {
