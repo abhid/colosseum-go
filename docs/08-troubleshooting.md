@@ -56,6 +56,19 @@ or set `--bind`.
 - verify configured image is pullable
 - verify workspace path exists and is accessible
 
+## Browser tool backend errors
+
+### Symptom
+
+- `browser.*` tool calls fail with docker runtime errors
+
+### Fix
+
+- verify docker daemon is running and accessible
+- verify `COLOSSEUM_BROWSER_IMAGE` is pullable
+- if needed, set `COLOSSEUM_BROWSER_MODE=local`
+- keep `COLOSSEUM_BROWSER_FALLBACK=true` to auto-fallback from docker backend
+
 ## Custom tool test returns unknown tool
 
 ### Symptom

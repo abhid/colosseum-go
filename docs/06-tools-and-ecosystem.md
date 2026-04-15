@@ -30,6 +30,36 @@ Custom tools:
 - created/edited/deleted via API/UI
 - runtime-discoverable and callable by model
 
+## Built-in Tool Families (v1)
+
+### Files and paths
+
+- `file.read`
+- `file.read_range`
+- `file.write`
+- `file.search`
+- `file.exists`
+- `file.stat`
+- `file.list`
+- `path.glob`
+- `apply.patch`
+
+### Web and JSON
+
+- `web.fetch`
+- `json.parse`
+- `json.query`
+
+### Browser (single-tab session)
+
+- `browser.open`
+- `browser.snapshot`
+- `browser.action`
+- `browser.wait`
+- `browser.close`
+
+Browser tools use a single-tab session per run and default to Docker-backed Playwright with local fallback when enabled.
+
 ## Custom Tool Kind: `shell_command`
 
 Config:

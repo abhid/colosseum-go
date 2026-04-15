@@ -5,10 +5,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
+	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +37,7 @@ type Executor struct {
 	DB           *sql.DB
 	ArtifactsDir string
 	Docker       DockerExecutor
+	Browser      *BrowserRuntime
 }
 
 type DockerExecutor interface {
@@ -54,9 +60,22 @@ func Builtins() []Definition {
 	return []Definition{
 		{Name: "shell.exec", Description: "Execute shell command in workspace", Schema: rawSchema(`{"type":"object","properties":{"command":{"type":"string"},"timeout_seconds":{"type":"integer","minimum":1,"maximum":600}},"required":["command"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
 		{Name: "file.read", Description: "Read a file from workspace", Schema: rawSchema(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
+		{Name: "file.read_range", Description: "Read a line range from file in workspace", Schema: rawSchema(`{"type":"object","properties":{"path":{"type":"string"},"start_line":{"type":"integer","minimum":1},"end_line":{"type":"integer","minimum":1}},"required":["path","start_line","end_line"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
 		{Name: "file.write", Description: "Write text to file in workspace", Schema: rawSchema(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
 		{Name: "file.search", Description: "Search file contents using regex pattern", Schema: rawSchema(`{"type":"object","properties":{"pattern":{"type":"string"},"glob":{"type":"string"}},"required":["pattern"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
-		{Name: "patch.apply", Description: "Apply unified diff patch text in workspace", Schema: rawSchema(`{"type":"object","properties":{"patch":{"type":"string"}},"required":["patch"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
+		{Name: "file.exists", Description: "Check whether a file path exists in workspace", Schema: rawSchema(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
+		{Name: "file.stat", Description: "Get file metadata for a path in workspace", Schema: rawSchema(`{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
+		{Name: "file.list", Description: "List files and directories under a workspace path", Schema: rawSchema(`{"type":"object","properties":{"path":{"type":"string"},"recursive":{"type":"boolean"},"max_entries":{"type":"integer","minimum":1,"maximum":5000}}}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
+		{Name: "path.glob", Description: "Find paths in workspace matching a glob pattern", Schema: rawSchema(`{"type":"object","properties":{"pattern":{"type":"string"}},"required":["pattern"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
+		{Name: "apply.patch", Description: "Apply unified diff patch text in workspace", Schema: rawSchema(`{"type":"object","properties":{"patch":{"type":"string"}},"required":["patch"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
+		{Name: "web.fetch", Description: "Fetch HTTP(S) content from a URL", Schema: rawSchema(`{"type":"object","properties":{"url":{"type":"string"},"timeout_seconds":{"type":"integer","minimum":1,"maximum":60},"max_bytes":{"type":"integer","minimum":1024,"maximum":1048576}},"required":["url"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
+		{Name: "json.parse", Description: "Parse JSON string and return normalized object", Schema: rawSchema(`{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
+		{Name: "json.query", Description: "Query JSON payload using a dot path expression", Schema: rawSchema(`{"type":"object","properties":{"input":{"description":"JSON object/array or stringified JSON"},"path":{"type":"string"}},"required":["input","path"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
+		{Name: "browser.open", Description: "Open URL in browser session", Schema: rawSchema(`{"type":"object","properties":{"url":{"type":"string"}},"required":["url"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
+		{Name: "browser.snapshot", Description: "Capture current page snapshot from browser session", Schema: rawSchema(`{"type":"object","properties":{"screenshot":{"type":"boolean"}}}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
+		{Name: "browser.action", Description: "Perform browser action on current page", Schema: rawSchema(`{"type":"object","properties":{"action":{"type":"string","enum":["click","type","press","select","scroll"]},"selector":{"type":"string"},"text":{"type":"string"},"key":{"type":"string"},"value":{"type":"string"},"delta_y":{"type":"integer"}},"required":["action"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
+		{Name: "browser.wait", Description: "Wait in browser session", Schema: rawSchema(`{"type":"object","properties":{"milliseconds":{"type":"integer","minimum":1,"maximum":30000}}}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
+		{Name: "browser.close", Description: "Close browser session for current run", Schema: rawSchema(`{"type":"object","properties":{}}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
 		{Name: "test.run", Description: "Run test command in workspace", Schema: rawSchema(`{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
 		{Name: "artifact.list", Description: "List artifacts generated for run", Schema: rawSchema(`{"type":"object","properties":{}}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
 		{Name: "artifact.get", Description: "Get artifact metadata by id", Schema: rawSchema(`{"type":"object","properties":{"artifact_id":{"type":"string"}},"required":["artifact_id"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
@@ -71,12 +90,38 @@ func (e *Executor) Execute(ctx context.Context, runCtx Context, name string, inp
 		return e.shellExec(ctx, runCtx, input)
 	case "file.read":
 		return e.fileRead(runCtx, input)
+	case "file.read_range":
+		return e.fileReadRange(runCtx, input)
 	case "file.write":
 		return e.fileWrite(runCtx, input)
 	case "file.search":
 		return e.fileSearch(ctx, runCtx, input)
-	case "patch.apply":
-		return e.patchApply(ctx, runCtx, input)
+	case "file.exists":
+		return e.fileExists(runCtx, input)
+	case "file.stat":
+		return e.fileStat(runCtx, input)
+	case "file.list":
+		return e.fileList(runCtx, input)
+	case "path.glob":
+		return e.pathGlob(runCtx, input)
+	case "apply.patch":
+		return e.applyPatch(ctx, runCtx, input)
+	case "web.fetch":
+		return e.webFetch(ctx, input)
+	case "json.parse":
+		return e.jsonParse(input)
+	case "json.query":
+		return e.jsonQuery(input)
+	case "browser.open":
+		return e.browserOpen(ctx, runCtx, input)
+	case "browser.snapshot":
+		return e.browserSnapshot(ctx, runCtx, input)
+	case "browser.action":
+		return e.browserAction(ctx, runCtx, input)
+	case "browser.wait":
+		return e.browserWait(ctx, runCtx, input)
+	case "browser.close":
+		return e.browserClose(ctx, runCtx)
 	case "test.run":
 		return e.testRun(ctx, runCtx, input)
 	case "artifact.list":
@@ -252,7 +297,7 @@ func (e *Executor) fileSearch(ctx context.Context, runCtx Context, input json.Ra
 	return Result{Output: map[string]any{"matches": string(out)}}, nil
 }
 
-func (e *Executor) patchApply(ctx context.Context, runCtx Context, input json.RawMessage) (Result, error) {
+func (e *Executor) applyPatch(ctx context.Context, runCtx Context, input json.RawMessage) (Result, error) {
 	var req struct {
 		Patch string `json:"patch"`
 	}
@@ -271,6 +316,278 @@ func (e *Executor) patchApply(ctx context.Context, runCtx Context, input json.Ra
 	out, err := cmd.CombinedOutput()
 	_ = e.insertArtifactRecord(runCtx, "patch", patchFile, "text/x-diff", int64(len(req.Patch)))
 	return Result{Output: map[string]any{"applied": err == nil}, Log: string(out), Artifacts: []string{patchFile}}, err
+}
+
+func (e *Executor) fileReadRange(runCtx Context, input json.RawMessage) (Result, error) {
+	var req struct {
+		Path      string `json:"path"`
+		StartLine int    `json:"start_line"`
+		EndLine   int    `json:"end_line"`
+	}
+	if err := json.Unmarshal(input, &req); err != nil {
+		return Result{}, err
+	}
+	if req.StartLine <= 0 || req.EndLine <= 0 || req.EndLine < req.StartLine {
+		return Result{}, fmt.Errorf("invalid line range")
+	}
+	full, err := safePath(runCtx.Workspace, req.Path)
+	if err != nil {
+		return Result{}, err
+	}
+	b, err := os.ReadFile(full)
+	if err != nil {
+		return Result{}, err
+	}
+	lines := strings.Split(string(b), "\n")
+	if req.StartLine > len(lines) {
+		return Result{Output: map[string]any{"path": req.Path, "content": "", "start_line": req.StartLine, "end_line": req.EndLine}}, nil
+	}
+	end := req.EndLine
+	if end > len(lines) {
+		end = len(lines)
+	}
+	chunk := strings.Join(lines[req.StartLine-1:end], "\n")
+	return Result{Output: map[string]any{
+		"path":       req.Path,
+		"start_line": req.StartLine,
+		"end_line":   end,
+		"content":    chunk,
+	}}, nil
+}
+
+func (e *Executor) fileExists(runCtx Context, input json.RawMessage) (Result, error) {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(input, &req); err != nil {
+		return Result{}, err
+	}
+	full, err := safePath(runCtx.Workspace, req.Path)
+	if err != nil {
+		return Result{}, err
+	}
+	_, err = os.Stat(full)
+	if err == nil {
+		return Result{Output: map[string]any{"path": req.Path, "exists": true}}, nil
+	}
+	if os.IsNotExist(err) {
+		return Result{Output: map[string]any{"path": req.Path, "exists": false}}, nil
+	}
+	return Result{}, err
+}
+
+func (e *Executor) fileStat(runCtx Context, input json.RawMessage) (Result, error) {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(input, &req); err != nil {
+		return Result{}, err
+	}
+	full, err := safePath(runCtx.Workspace, req.Path)
+	if err != nil {
+		return Result{}, err
+	}
+	info, err := os.Stat(full)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Output: map[string]any{
+		"path":      req.Path,
+		"size":      info.Size(),
+		"is_dir":    info.IsDir(),
+		"mode":      info.Mode().String(),
+		"modified":  info.ModTime().UTC().Format(time.RFC3339Nano),
+		"basename":  info.Name(),
+		"extension": filepath.Ext(info.Name()),
+	}}, nil
+}
+
+func (e *Executor) fileList(runCtx Context, input json.RawMessage) (Result, error) {
+	var req struct {
+		Path       string `json:"path"`
+		Recursive  bool   `json:"recursive"`
+		MaxEntries int    `json:"max_entries"`
+	}
+	if err := json.Unmarshal(input, &req); err != nil {
+		return Result{}, err
+	}
+	if req.Path == "" {
+		req.Path = "."
+	}
+	if req.MaxEntries <= 0 {
+		req.MaxEntries = 200
+	}
+	root, err := safePath(runCtx.Workspace, req.Path)
+	if err != nil {
+		return Result{}, err
+	}
+	entries := make([]map[string]any, 0)
+	if req.Recursive {
+		err = filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if len(entries) >= req.MaxEntries {
+				return fs.SkipAll
+			}
+			rel, _ := filepath.Rel(runCtx.Workspace, p)
+			entries = append(entries, map[string]any{"path": filepath.ToSlash(rel), "is_dir": d.IsDir()})
+			return nil
+		})
+		if err != nil && err != fs.SkipAll {
+			return Result{}, err
+		}
+	} else {
+		dirEntries, err := os.ReadDir(root)
+		if err != nil {
+			return Result{}, err
+		}
+		for i, d := range dirEntries {
+			if i >= req.MaxEntries {
+				break
+			}
+			p := filepath.Join(root, d.Name())
+			rel, _ := filepath.Rel(runCtx.Workspace, p)
+			entries = append(entries, map[string]any{"path": filepath.ToSlash(rel), "is_dir": d.IsDir()})
+		}
+	}
+	return Result{Output: map[string]any{"entries": entries, "count": len(entries)}}, nil
+}
+
+func (e *Executor) pathGlob(runCtx Context, input json.RawMessage) (Result, error) {
+	var req struct {
+		Pattern string `json:"pattern"`
+	}
+	if err := json.Unmarshal(input, &req); err != nil {
+		return Result{}, err
+	}
+	pattern := strings.TrimSpace(req.Pattern)
+	if pattern == "" {
+		return Result{}, fmt.Errorf("pattern required")
+	}
+	matches := make([]string, 0)
+	_ = filepath.WalkDir(runCtx.Workspace, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, rerr := filepath.Rel(runCtx.Workspace, p)
+		if rerr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		ok, _ := path.Match(pattern, rel)
+		if ok {
+			matches = append(matches, rel)
+		}
+		return nil
+	})
+	return Result{Output: map[string]any{"pattern": pattern, "matches": matches, "count": len(matches)}}, nil
+}
+
+func (e *Executor) webFetch(ctx context.Context, input json.RawMessage) (Result, error) {
+	var req struct {
+		URL           string `json:"url"`
+		TimeoutSecond int    `json:"timeout_seconds"`
+		MaxBytes      int64  `json:"max_bytes"`
+	}
+	if err := json.Unmarshal(input, &req); err != nil {
+		return Result{}, err
+	}
+	if req.URL == "" {
+		return Result{}, fmt.Errorf("url required")
+	}
+	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
+		return Result{}, fmt.Errorf("only http/https urls are allowed")
+	}
+	if req.TimeoutSecond <= 0 {
+		req.TimeoutSecond = 15
+	}
+	if req.MaxBytes <= 0 {
+		req.MaxBytes = 256 * 1024
+	}
+	client := &http.Client{Timeout: time.Duration(req.TimeoutSecond) * time.Second}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.URL, nil)
+	if err != nil {
+		return Result{}, err
+	}
+	httpReq.Header.Set("User-Agent", "colosseum/1.0")
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return Result{}, err
+	}
+	defer resp.Body.Close()
+	b, err := ioReadAllLimited(resp.Body, req.MaxBytes)
+	if err != nil {
+		return Result{}, err
+	}
+	content := string(b)
+	return Result{Output: map[string]any{
+		"url":          req.URL,
+		"status":       resp.StatusCode,
+		"content":      content,
+		"content_len":  len(content),
+		"content_type": resp.Header.Get("Content-Type"),
+	}}, nil
+}
+
+func (e *Executor) jsonParse(input json.RawMessage) (Result, error) {
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(input, &req); err != nil {
+		return Result{}, err
+	}
+	var parsed any
+	if err := json.Unmarshal([]byte(req.Text), &parsed); err != nil {
+		return Result{}, err
+	}
+	return Result{Output: map[string]any{"value": parsed}}, nil
+}
+
+func (e *Executor) jsonQuery(input json.RawMessage) (Result, error) {
+	var req struct {
+		Input any    `json:"input"`
+		Path  string `json:"path"`
+	}
+	if err := json.Unmarshal(input, &req); err != nil {
+		return Result{}, err
+	}
+	val := req.Input
+	if s, ok := req.Input.(string); ok {
+		var parsed any
+		if err := json.Unmarshal([]byte(s), &parsed); err == nil {
+			val = parsed
+		}
+	}
+	pathExpr := strings.TrimSpace(req.Path)
+	if pathExpr == "" || pathExpr == "." {
+		return Result{Output: map[string]any{"value": val}}, nil
+	}
+	current := val
+	parts := strings.Split(pathExpr, ".")
+	for _, raw := range parts {
+		part := strings.TrimSpace(raw)
+		if part == "" {
+			continue
+		}
+		switch node := current.(type) {
+		case map[string]any:
+			next, ok := node[part]
+			if !ok {
+				return Result{}, fmt.Errorf("path not found: %s", part)
+			}
+			current = next
+		case []any:
+			i, err := strconv.Atoi(part)
+			if err != nil || i < 0 || i >= len(node) {
+				return Result{}, fmt.Errorf("invalid array index: %s", part)
+			}
+			current = node[i]
+		default:
+			return Result{}, fmt.Errorf("cannot traverse into %T", current)
+		}
+	}
+	return Result{Output: map[string]any{"value": current}}, nil
 }
 
 func (e *Executor) testRun(ctx context.Context, runCtx Context, input json.RawMessage) (Result, error) {
@@ -358,6 +675,21 @@ func truncateOutput(s string, max int) string {
 		return s
 	}
 	return s[:max] + "\n...[output truncated]..."
+}
+
+func ioReadAllLimited(r io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		limit = 256 * 1024
+	}
+	lr := io.LimitReader(r, limit+1)
+	b, err := io.ReadAll(lr)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > limit {
+		b = b[:limit]
+	}
+	return b, nil
 }
 
 func (e *Executor) writeRunArtifact(runCtx Context, prefix, ext string, content []byte) (string, error) {

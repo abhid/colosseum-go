@@ -17,6 +17,8 @@ var riskyPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\brm\s+-rf\s+/`),
 	regexp.MustCompile(`(?i)\bcurl\s+https?://`),
 	regexp.MustCompile(`(?i)\bwget\s+https?://`),
+	regexp.MustCompile(`(?i)\bssh\s+`),
+	regexp.MustCompile(`(?i)\bscp\s+`),
 }
 
 func EvaluateTool(toolName string, input json.RawMessage, allowed []string) Decision {
@@ -41,6 +43,39 @@ func EvaluateTool(toolName string, input json.RawMessage, allowed []string) Deci
 		for _, pattern := range riskyPatterns {
 			if pattern.MatchString(req.Command) {
 				return Decision{Allow: true, RequireApproval: true, Reason: "risky command requires approval"}
+			}
+		}
+	}
+
+	if toolName == "web.fetch" {
+		var req struct {
+			URL string `json:"url"`
+		}
+		_ = json.Unmarshal(input, &req)
+		if strings.Contains(req.URL, "169.254.169.254") || strings.HasPrefix(strings.ToLower(req.URL), "file://") {
+			return Decision{Allow: false, Reason: "blocked url scheme/host"}
+		}
+		if strings.Contains(req.URL, "localhost") || strings.Contains(req.URL, "127.0.0.1") {
+			return Decision{Allow: true, RequireApproval: true, Reason: "local network access requires approval"}
+		}
+	}
+
+	if strings.HasPrefix(toolName, "browser.") {
+		switch toolName {
+		case "browser.open", "browser.action", "browser.snapshot", "browser.wait", "browser.close":
+		default:
+			return Decision{Allow: false, Reason: "unsupported browser tool"}
+		}
+		if toolName == "browser.open" {
+			var req struct {
+				URL string `json:"url"`
+			}
+			_ = json.Unmarshal(input, &req)
+			if strings.HasPrefix(strings.ToLower(req.URL), "file://") {
+				return Decision{Allow: false, Reason: "file scheme blocked for browser"}
+			}
+			if strings.Contains(req.URL, "localhost") || strings.Contains(req.URL, "127.0.0.1") {
+				return Decision{Allow: true, RequireApproval: true, Reason: "local browser target requires approval"}
 			}
 		}
 	}

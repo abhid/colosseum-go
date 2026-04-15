@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -18,8 +19,12 @@ func Open(path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
+	// Allow concurrent readers while keeping SQLite write behavior stable in WAL mode.
+	db.SetMaxOpenConns(8)
+	db.SetMaxIdleConns(4)
+	db.SetConnMaxLifetime(30 * time.Minute)
 	_, _ = db.Exec(`PRAGMA journal_mode=WAL;`)
+	_, _ = db.Exec(`PRAGMA busy_timeout=5000;`)
 	_, _ = db.Exec(`PRAGMA foreign_keys=ON;`)
 	return db, nil
 }

@@ -35,6 +35,9 @@ Precedence:
 - `COLOSSEUM_WORKSPACE_ROOT`
 - `COLOSSEUM_DOCKER_IMAGE`
 - `COLOSSEUM_DEFAULT_MODEL`
+- `COLOSSEUM_BROWSER_MODE` (`docker`, `local`, `auto`)
+- `COLOSSEUM_BROWSER_IMAGE` (Playwright image used for docker browser backend)
+- `COLOSSEUM_BROWSER_FALLBACK` (`true`/`false`)
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
 - `DOCKER_HOST` (if non-default docker host is required)

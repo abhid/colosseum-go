@@ -517,10 +517,10 @@ function TranscriptTab({
                       }}
                       disabled={replayPending}
                       className="inline-flex items-center gap-0.5 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                      title={`Replay from step ${stepIndexByID[row.step_id]}`}
+                      title={`Restart from step ${stepIndexByID[row.step_id]}`}
                     >
                       <RotateCcw className="h-2.5 w-2.5" />
-                      Replay
+                      Restart here
                     </button>
                   ) : null}
                 </div>

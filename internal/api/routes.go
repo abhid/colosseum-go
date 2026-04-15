@@ -69,6 +69,7 @@ func registerAPIRoutes(
 		r.Post("/agents", createAgentHandler(db))
 		r.Get("/agents", listAgentsHandler(db))
 		r.Put("/agents/{id}", updateAgentHandler(db))
+		r.Delete("/agents/{id}", deleteAgentHandler(db))
 		r.Get("/tools", listToolsHandler(db))
 		r.Post("/tools", createToolHandler(db))
 		r.Put("/tools/{id}", updateToolHandler(db))
@@ -322,6 +323,41 @@ func updateAgentHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"id": agentID})
+	}
+}
+
+func deleteAgentHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		agentID := chi.URLParam(r, "id")
+		var runCount int
+		if err := db.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM runs WHERE agent_id=?`, agentID).Scan(&runCount); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if runCount > 0 {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "agent has runs; cannot delete"})
+			return
+		}
+		var suiteCount int
+		if err := db.QueryRowContext(r.Context(), `SELECT COUNT(1) FROM eval_suites WHERE agent_id=?`, agentID).Scan(&suiteCount); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if suiteCount > 0 {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "agent is used by eval suites; cannot delete"})
+			return
+		}
+		res, err := db.ExecContext(r.Context(), `DELETE FROM agents WHERE id=?`, agentID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		affected, _ := res.RowsAffected()
+		if affected == 0 {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "agent not found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 	}
 }
 

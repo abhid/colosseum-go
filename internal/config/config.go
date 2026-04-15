@@ -4,20 +4,24 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 )
 
 type Config struct {
-	BindAddr      string
-	ListenIP      string
-	Port          int
-	DBPath        string
-	ArtifactPath  string
-	WorkspaceRoot string
-	DockerHost    string
-	DockerImage   string
-	OpenAIKey     string
-	AnthropicKey  string
-	DefaultModel  string
+	BindAddr        string
+	ListenIP        string
+	Port            int
+	DBPath          string
+	ArtifactPath    string
+	WorkspaceRoot   string
+	DockerHost      string
+	DockerImage     string
+	OpenAIKey       string
+	AnthropicKey    string
+	DefaultModel    string
+	BrowserMode     string
+	BrowserImage    string
+	BrowserFallback bool
 }
 
 func Load(args []string) Config {
@@ -26,17 +30,20 @@ func Load(args []string) Config {
 	defaultBind := getenv("COLOSSEUM_BIND", fmt.Sprintf("%s:%d", listenIP, port))
 
 	cfg := Config{
-		BindAddr:     defaultBind,
-		ListenIP:     listenIP,
-		Port:         port,
-		DBPath:       getenv("COLOSSEUM_DB_PATH", "./colosseum.db"),
-		ArtifactPath: getenv("COLOSSEUM_ARTIFACT_PATH", "./artifacts"),
-		WorkspaceRoot: getenv("COLOSSEUM_WORKSPACE_ROOT", "./workspaces"),
-		DockerHost:   getenv("DOCKER_HOST", ""),
-		DockerImage:  getenv("COLOSSEUM_DOCKER_IMAGE", "golang:1.25-bookworm"),
-		OpenAIKey:    os.Getenv("OPENAI_API_KEY"),
-		AnthropicKey: os.Getenv("ANTHROPIC_API_KEY"),
-		DefaultModel: getenv("COLOSSEUM_DEFAULT_MODEL", "gpt-4.1-mini"),
+		BindAddr:        defaultBind,
+		ListenIP:        listenIP,
+		Port:            port,
+		DBPath:          getenv("COLOSSEUM_DB_PATH", "./colosseum.db"),
+		ArtifactPath:    getenv("COLOSSEUM_ARTIFACT_PATH", "./artifacts"),
+		WorkspaceRoot:   getenv("COLOSSEUM_WORKSPACE_ROOT", "./workspaces"),
+		DockerHost:      getenv("DOCKER_HOST", ""),
+		DockerImage:     getenv("COLOSSEUM_DOCKER_IMAGE", "golang:1.25-bookworm"),
+		OpenAIKey:       os.Getenv("OPENAI_API_KEY"),
+		AnthropicKey:    os.Getenv("ANTHROPIC_API_KEY"),
+		DefaultModel:    getenv("COLOSSEUM_DEFAULT_MODEL", "gpt-4.1-mini"),
+		BrowserMode:     getenv("COLOSSEUM_BROWSER_MODE", "docker"),
+		BrowserImage:    getenv("COLOSSEUM_BROWSER_IMAGE", "mcr.microsoft.com/playwright:v1.59.1-jammy"),
+		BrowserFallback: getenvBool("COLOSSEUM_BROWSER_FALLBACK", true),
 	}
 
 	fs := flag.NewFlagSet("colosseum", flag.ContinueOnError)
@@ -83,4 +90,19 @@ func hasFlag(args []string, flagName string) bool {
 		}
 	}
 	return false
+}
+
+func getenvBool(key string, fallback bool) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if v == "" {
+		return fallback
+	}
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }

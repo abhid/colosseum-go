@@ -57,9 +57,22 @@ Built-ins:
 
 - `shell.exec`
 - `file.read`
+- `file.read_range`
 - `file.write`
 - `file.search`
-- `patch.apply`
+- `file.exists`
+- `file.stat`
+- `file.list`
+- `path.glob`
+- `apply.patch`
+- `web.fetch`
+- `json.parse`
+- `json.query`
+- `browser.open`
+- `browser.snapshot`
+- `browser.action`
+- `browser.wait`
+- `browser.close`
 - `test.run`
 - `artifact.list`
 - `artifact.get`

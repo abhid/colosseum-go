@@ -80,6 +80,11 @@ func runServer() {
 	}
 
 	toolExec := &tools.Executor{DB: database, ArtifactsDir: cfg.ArtifactPath, Docker: dockerMgr}
+	toolExec.Browser = &tools.BrowserRuntime{
+		Mode:     cfg.BrowserMode,
+		Image:    cfg.BrowserImage,
+		Fallback: cfg.BrowserFallback,
+	}
 	runtimeMgr := runtime.NewManager(database, providerMap, toolExec)
 	evalMgr := evals.NewManager(database, cfg.WorkspaceRoot)
 	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())

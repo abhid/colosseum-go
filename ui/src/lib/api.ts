@@ -16,6 +16,7 @@ export const api = {
   createAgent: (body: Partial<Agent>) => request<{ id: string }>('/api/agents', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
   updateAgent: (id: string, body: Partial<Agent>) =>
     request<{ id: string }>(`/api/agents/${id}`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }),
+  deleteAgent: (id: string) => request<{ deleted: boolean }>(`/api/agents/${id}`, { method: 'DELETE' }),
   listTools: () => request<ToolDef[]>('/api/tools'),
   listProviders: () => request<ProviderInfo[]>('/api/providers'),
   listOpenAIModels: () => request<string[]>('/api/providers/openai/models'),
