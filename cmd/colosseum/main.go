@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -21,45 +23,80 @@ import (
 	"github.com/joho/godotenv"
 )
 
+var version = "dev"
+
 func main() {
+	setupLogging()
+
 	if len(os.Args) < 2 {
-		fmt.Println("usage: colosseum <server>")
-		os.Exit(1)
+		fmt.Print(config.RootHelp())
+		os.Exit(2)
 	}
 
 	switch os.Args[1] {
 	case "server":
-		runServer()
+		runServer(os.Args[2:])
+	case "help", "--help", "-h":
+		if len(os.Args) > 2 && os.Args[2] == "server" {
+			fmt.Print(config.ServerHelp())
+			return
+		}
+		fmt.Print(config.RootHelp())
+	case "version":
+		fmt.Printf("colosseum %s\n", version)
 	default:
-		fmt.Printf("unknown command: %s\n", os.Args[1])
-		os.Exit(1)
+		logErrorf("unknown command %q", os.Args[1])
+		fmt.Fprintln(os.Stderr)
+		fmt.Print(config.RootHelp())
+		os.Exit(2)
 	}
 }
 
-func runServer() {
+func runServer(args []string) {
 	// Load optional .env files for local development without overriding shell env.
 	_ = godotenv.Load(".env.local", ".env")
+	if config.WantsHelp(args) {
+		fmt.Print(config.ServerHelp())
+		return
+	}
 
-	cfg := config.Load(os.Args[2:])
+	cfg, err := config.Load(args)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fmt.Print(config.ServerHelp())
+			return
+		}
+		logErrorf("%v", err)
+		fmt.Fprintln(os.Stderr)
+		fmt.Print(config.ServerHelp())
+		os.Exit(2)
+	}
+	logInfof(
+		"startup version=%s bind=%s db=%s artifacts=%s workspace_root=%s browser_mode=%s",
+		version, cfg.BindAddr, cfg.DBPath, cfg.ArtifactPath, cfg.WorkspaceRoot, cfg.BrowserMode,
+	)
+	if cfg.OpenAIKey == "" && cfg.AnthropicKey == "" {
+		logWarnf("no model provider API keys configured; provider-backed runs may fail")
+	}
 
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
-		log.Fatalf("db open failed: %v", err)
+		logFatalf("db open failed: %v", err)
 	}
 	defer database.Close()
 
 	if err := db.Migrate(database); err != nil {
-		log.Fatalf("migration failed: %v", err)
+		logFatalf("migration failed: %v", err)
 	}
 	if err := tools.EnsureBuiltinDefinitions(context.Background(), database); err != nil {
-		log.Fatalf("tool seed failed: %v", err)
+		logFatalf("tool seed failed: %v", err)
 	}
 
 	if err := os.MkdirAll(cfg.ArtifactPath, 0o755); err != nil {
-		log.Fatalf("artifact directory creation failed: %v", err)
+		logFatalf("artifact directory creation failed: %v", err)
 	}
 	if err := os.MkdirAll(cfg.WorkspaceRoot, 0o755); err != nil {
-		log.Fatalf("workspace root creation failed: %v", err)
+		logFatalf("workspace root creation failed: %v", err)
 	}
 
 	providerMap := map[string]providers.Client{}
@@ -74,10 +111,10 @@ func runServer() {
 	}
 	dockerMgr, err := docker.NewManager(database, cfg.DockerImage)
 	if err != nil {
-		log.Fatalf("docker init failed: %v", err)
+		logFatalf("docker init failed: %v", err)
 	}
 	if err := dockerMgr.Ping(context.Background()); err != nil {
-		log.Printf("warning: docker ping failed: %v", err)
+		logWarnf("docker ping failed: %v", err)
 	} else {
 		_ = dockerMgr.CleanupOrphans(context.Background())
 	}
@@ -103,9 +140,9 @@ func runServer() {
 	}
 
 	go func() {
-		log.Printf("colosseum listening on %s", cfg.BindAddr)
+		logInfof("listening bind=%s", cfg.BindAddr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("http server error: %v", err)
+			logFatalf("http server error: %v", err)
 		}
 	}()
 
@@ -113,13 +150,13 @@ func runServer() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(stop)
 
-	<-stop
-	log.Printf("shutdown signal received, stopping server...")
+	firstSignal := <-stop
+	logWarnf("shutdown signal=%s received; stopping server", firstSignal.String())
 
 	// Second Ctrl+C forces immediate exit.
 	go func() {
 		<-stop
-		log.Printf("second shutdown signal received, forcing exit")
+		logErrorf("second shutdown signal received; forcing exit")
 		os.Exit(1)
 	}()
 
@@ -141,12 +178,35 @@ func runServer() {
 	select {
 	case <-waitDone:
 	case <-time.After(2 * time.Second):
-		log.Printf("runtime workers still stopping, continuing with server shutdown")
+		logWarnf("runtime workers still stopping; continuing with HTTP shutdown")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
-		log.Printf("http shutdown warning: %v", err)
+		logWarnf("http shutdown warning: %v", err)
 	}
+	logInfof("server stopped cleanly")
+}
+
+func setupLogging() {
+	log.SetOutput(os.Stdout)
+	log.SetFlags(log.LstdFlags | log.Lmicroseconds | log.LUTC)
+}
+
+func logInfof(format string, args ...any) {
+	log.Printf("level=INFO msg=\""+format+"\"", args...)
+}
+
+func logWarnf(format string, args ...any) {
+	log.Printf("level=WARN msg=\""+format+"\"", args...)
+}
+
+func logErrorf(format string, args ...any) {
+	log.Printf("level=ERROR msg=\""+format+"\"", args...)
+}
+
+func logFatalf(format string, args ...any) {
+	log.Printf("level=FATAL msg=\""+format+"\"", args...)
+	os.Exit(1)
 }

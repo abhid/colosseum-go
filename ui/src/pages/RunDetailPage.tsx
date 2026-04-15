@@ -430,7 +430,7 @@ export function RunDetailPage() {
                       : 'hover spans for details'}
                   </span>
                 </div>
-                <div className="w-full h-10 rounded border border-gray-200 relative overflow-hidden flex items-center bg-white">
+                <div className="w-full h-10 rounded relative overflow-hidden flex items-center bg-white">
                   {timeline && timeline.spans.map((span) => {
                     const start = ((span.__start - timeline.min) / timeline.total) * 100
                     const spanMs = Math.max(0, (span.__end || span.__start) - span.__start)

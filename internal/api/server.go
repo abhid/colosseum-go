@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"io/fs"
+	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -33,6 +35,7 @@ func NewServer(
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
+	r.Use(requestLogger())
 	r.Use(timeoutExceptStream(120 * time.Second))
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -110,4 +113,65 @@ func timeoutExceptStream(d time.Duration) func(http.Handler) http.Handler {
 			wrapped.ServeHTTP(w, r)
 		})
 	}
+}
+
+func requestLogger() func(http.Handler) http.Handler {
+	const slowRequestThreshold = 1000 * time.Millisecond
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+			next.ServeHTTP(ww, r)
+
+			status := ww.Status()
+			if status == 0 {
+				status = http.StatusOK
+			}
+			duration := time.Since(start)
+			if !shouldLogRequest(r.Method, r.URL.Path, status, duration) {
+				return
+			}
+			level := "INFO"
+			if status >= http.StatusInternalServerError {
+				level = "ERROR"
+			} else if status >= http.StatusBadRequest || duration >= slowRequestThreshold {
+				level = "WARN"
+			}
+			remoteIP := r.RemoteAddr
+			if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+				remoteIP = host
+			}
+			log.Printf(
+				"level=%s msg=\"http_request\" method=%s path=%s status=%d bytes=%d duration_ms=%d remote_ip=%s request_id=%s",
+				level,
+				r.Method,
+				r.URL.Path,
+				status,
+				ww.BytesWritten(),
+				duration.Milliseconds(),
+				remoteIP,
+				middleware.GetReqID(r.Context()),
+			)
+		})
+	}
+}
+
+func shouldLogRequest(method, path string, status int, duration time.Duration) bool {
+	if strings.HasPrefix(path, "/healthz") || strings.HasPrefix(path, "/readyz") {
+		return false
+	}
+	if strings.HasPrefix(path, "/api/stream/") {
+		return status >= http.StatusBadRequest
+	}
+	// Keep hot polling endpoints quiet unless they are slow or failing.
+	if strings.HasSuffix(path, "/telemetry") || strings.HasSuffix(path, "/artifacts") {
+		return status >= http.StatusBadRequest || duration >= 1500*time.Millisecond
+	}
+	// For GET/HEAD traffic, only log slow/failing requests.
+	if method == http.MethodGet || method == http.MethodHead {
+		return status >= http.StatusBadRequest || duration >= 1000*time.Millisecond
+	}
+	// Always log mutating/operational requests.
+	return true
 }
