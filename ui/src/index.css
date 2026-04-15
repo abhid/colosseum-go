@@ -1,0 +1,29 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import "@fontsource/monaspace-neon/400.css";
+@import "@fontsource/monaspace-neon/500.css";
+@import "@fontsource/monaspace-neon/600.css";
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Monaspace Neon", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:root {
+  color: #0f172a;
+  background: #f5f7fb;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: #f5f7fb;
+  color: #0f172a;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root {
+  min-height: 100vh;
+}
