@@ -3,6 +3,7 @@ import { Layout } from './components/Layout'
 import { RunsPage } from './pages/RunsPage'
 import { RunDetailPage } from './pages/RunDetailPage'
 import { AgentsPage } from './pages/AgentsPage'
+import { AgentDetailPage } from './pages/AgentDetailPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { ApprovalsPage } from './pages/ApprovalsPage'
 import { ToolsPage } from './pages/ToolsPage'
@@ -16,6 +17,7 @@ function App() {
         <Route path="/" element={<RunsPage />} />
         <Route path="/runs/:id" element={<RunDetailPage />} />
         <Route path="/agents" element={<AgentsPage />} />
+        <Route path="/agents/:id" element={<AgentDetailPage />} />
         <Route path="/tools" element={<ToolsPage />} />
         <Route path="/evaluations" element={<EvaluationsPage />} />
         <Route path="/ecosystem" element={<EcosystemPage />} />

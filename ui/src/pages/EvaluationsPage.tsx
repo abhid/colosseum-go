@@ -73,34 +73,34 @@ export function EvaluationsPage() {
       <SectionTitle title="Evaluations" subtitle="Harness, regressions, and deterministic quality gates" />
 
       <Card>
-        <h3 className="mb-3 text-sm font-semibold tracking-tight">Create Eval Suite</h3>
-        <div className="grid gap-2 xl:grid-cols-2">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Suite name" className="h-9 rounded border border-slate-300 bg-white px-3 text-sm" />
-          <select value={agentID} onChange={(e) => setAgentID(e.target.value)} className="h-9 rounded border border-slate-300 bg-white px-3 text-sm">
+        <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Create Eval Suite</h3>
+        <div className="grid gap-3 xl:grid-cols-2">
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Suite name" className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" />
+          <select value={agentID} onChange={(e) => setAgentID(e.target.value)} className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400">
             <option value="">Select agent</option>
             {(agentsQ.data ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </div>
-        <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Description" className="mt-2 h-9 w-full rounded border border-slate-300 bg-white px-3 text-sm" />
-        <textarea value={casesJSON} onChange={(e) => setCasesJSON(e.target.value)} className="mt-2 h-40 w-full rounded border border-slate-300 bg-white p-3 font-mono text-xs" />
-        <div className="mt-2 flex justify-end">
-          <button disabled={!name || !agentID || createSuite.isPending} onClick={() => createSuite.mutate()} className="h-9 rounded bg-indigo-600 px-3 text-xs font-medium text-white disabled:opacity-50">Create suite</button>
+        <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Description" className="mt-3 h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" />
+        <textarea value={casesJSON} onChange={(e) => setCasesJSON(e.target.value)} className="mt-3 h-40 w-full rounded-md border border-gray-300 bg-white p-3 font-mono text-xs focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" />
+        <div className="mt-4 flex justify-end">
+          <button disabled={!name || !agentID || createSuite.isPending} onClick={() => createSuite.mutate()} className="h-9 rounded-md bg-gray-900 px-4 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50">Create suite</button>
         </div>
       </Card>
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
-          <h3 className="mb-3 text-sm font-semibold tracking-tight">Suites</h3>
+          <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Suites</h3>
           {(suitesQ.data ?? []).length === 0 ? <EmptyState title="No suites yet" body="Create a suite to start regression testing." /> : (
-            <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
+            <div className="max-h-[420px] space-y-3 overflow-auto pr-1">
               {(suitesQ.data ?? []).map((s) => (
-                <button key={s.id} onClick={() => setSelectedSuiteID(s.id)} className={`w-full rounded border p-2 text-left ${selectedSuiteID === s.id ? 'border-indigo-300 bg-indigo-50/40' : 'border-slate-200 hover:border-indigo-200'}`}>
+                <button key={s.id} onClick={() => setSelectedSuiteID(s.id)} className={`w-full rounded-lg border p-3 text-left transition-colors ${selectedSuiteID === s.id ? 'border-gray-400 bg-gray-50' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50/50'}`}>
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">{s.name}</p>
+                    <p className="text-sm font-medium text-gray-900">{s.name}</p>
                     {s.latest_status ? <StatusBadge status={s.latest_status} /> : null}
                   </div>
-                  <p className="text-xs text-slate-600">{s.description}</p>
-                  <p className="text-[11px] text-slate-500">{s.case_count || 0} cases</p>
+                  <p className="mt-1 text-xs text-gray-600">{s.description}</p>
+                  <p className="mt-2 text-[11px] text-gray-500">{s.case_count || 0} cases</p>
                 </button>
               ))}
             </div>
@@ -108,16 +108,16 @@ export function EvaluationsPage() {
         </Card>
 
         <Card>
-          <h3 className="mb-3 text-sm font-semibold tracking-tight">Eval Runs</h3>
+          <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Eval Runs</h3>
           {(runsQ.data ?? []).length === 0 ? <EmptyState title="No eval runs yet" body="Queue a run for any suite." /> : (
-            <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
+            <div className="max-h-[420px] space-y-3 overflow-auto pr-1">
               {(runsQ.data ?? []).map((r) => (
-                <button key={r.id} onClick={() => setSelectedEvalRunID(r.id)} className={`w-full rounded border p-2 text-left ${selectedEvalRunID === r.id ? 'border-indigo-300 bg-indigo-50/40' : 'border-slate-200 hover:border-indigo-200'}`}>
+                <button key={r.id} onClick={() => setSelectedEvalRunID(r.id)} className={`w-full rounded-lg border p-3 text-left transition-colors ${selectedEvalRunID === r.id ? 'border-gray-400 bg-gray-50' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50/50'}`}>
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium">{r.suite_name || r.suite_id}</p>
+                    <p className="text-sm font-medium text-gray-900">{r.suite_name || r.suite_id}</p>
                     <StatusBadge status={r.status} />
                   </div>
-                  <p className="text-[11px] text-slate-500">{r.passed_cases}/{r.total_cases} passed</p>
+                  <p className="mt-2 text-[11px] text-gray-500">{r.passed_cases}/{r.total_cases} passed</p>
                 </button>
               ))}
             </div>
@@ -127,17 +127,17 @@ export function EvaluationsPage() {
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-sm font-semibold tracking-tight">Suite Detail</h3>
-            <button disabled={!selectedSuiteID || queueRun.isPending} onClick={() => selectedSuiteID && queueRun.mutate(selectedSuiteID)} className="h-8 rounded border border-slate-300 px-2.5 text-xs font-medium hover:bg-slate-50 disabled:opacity-50">Run suite</button>
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="text-sm font-semibold tracking-tight text-gray-900">Suite Detail</h3>
+            <button disabled={!selectedSuiteID || queueRun.isPending} onClick={() => selectedSuiteID && queueRun.mutate(selectedSuiteID)} className="h-8 rounded-md border border-gray-300 px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50">Run suite</button>
           </div>
           {!suiteDetailQ.data ? <EmptyState title="Select a suite" body="Choose a suite to view cases and recent runs." /> : (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {(suiteDetailQ.data.cases ?? []).map((c) => (
-                <div key={String(c.id)} className="rounded border border-slate-200 p-2">
-                  <p className="text-sm font-medium">{String(c.name)}</p>
-                  <p className="line-clamp-2 text-xs text-slate-600">{String(c.task)}</p>
-                  <pre className="mt-1 overflow-auto rounded bg-slate-900 p-2 font-mono text-[11px] text-slate-100">{String(c.assertion_json || '{}')}</pre>
+                <div key={String(c.id)} className="rounded-lg border border-gray-200 p-3">
+                  <p className="text-sm font-medium text-gray-900">{String(c.name)}</p>
+                  <p className="mt-1 line-clamp-2 text-xs text-gray-600">{String(c.task)}</p>
+                  <pre className="mt-3 overflow-auto rounded bg-gray-900 p-3 font-mono text-[11px] text-gray-100">{String(c.assertion_json || '{}')}</pre>
                 </div>
               ))}
             </div>
@@ -145,27 +145,27 @@ export function EvaluationsPage() {
         </Card>
 
         <Card>
-          <h3 className="mb-2 text-sm font-semibold tracking-tight">Regression + Run Report</h3>
+          <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Regression + Run Report</h3>
           {!evalRunDetailQ.data ? <EmptyState title="Select an eval run" body="Select a run to inspect case-level outcomes." /> : (
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3">
                 <StatusBadge status={evalRunDetailQ.data.run.status} />
-                <span className="text-xs text-slate-600">Pass rate: {latestPassRate}</span>
-                <span className="text-xs text-slate-600">Cases: {evalRunDetailQ.data.run.total_cases}</span>
+                <span className="text-xs font-medium text-gray-600">Pass rate: {latestPassRate}</span>
+                <span className="text-xs font-medium text-gray-600">Cases: {evalRunDetailQ.data.run.total_cases}</span>
               </div>
-              <div className="max-h-52 space-y-2 overflow-auto pr-1">
+              <div className="max-h-52 space-y-3 overflow-auto pr-1">
                 {(evalRunDetailQ.data.cases ?? []).map((c) => (
-                  <div key={String(c.id)} className="rounded border border-slate-200 p-2 text-xs">
+                  <div key={String(c.id)} className="rounded-lg border border-gray-200 p-3 text-xs">
                     <div className="flex items-center justify-between">
-                      <span className="font-medium">{String(c.case_id)}</span>
+                      <span className="font-medium text-gray-900">{String(c.case_id)}</span>
                       <StatusBadge status={String(c.status)} />
                     </div>
-                    <p className="text-slate-600">score {Math.round(Number(c.score || 0) * 100)}% • {Number(c.latency_ms || 0)}ms</p>
-                    <p className="line-clamp-2 text-slate-600">{String(c.result_excerpt || '')}</p>
+                    <p className="mt-1 text-gray-600">score {Math.round(Number(c.score || 0) * 100)}% • {Number(c.latency_ms || 0)}ms</p>
+                    <p className="mt-2 line-clamp-2 text-gray-700">{String(c.result_excerpt || '')}</p>
                   </div>
                 ))}
               </div>
-              <pre className="max-h-44 overflow-auto rounded bg-slate-900 p-2 font-mono text-[11px] text-slate-100">{JSON.stringify(regressionQ.data ?? { ready: false }, null, 2)}</pre>
+              <pre className="max-h-44 overflow-auto rounded bg-gray-900 p-3 font-mono text-[11px] text-gray-100">{JSON.stringify(regressionQ.data ?? { ready: false }, null, 2)}</pre>
             </div>
           )}
         </Card>

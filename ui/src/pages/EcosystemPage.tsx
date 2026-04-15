@@ -50,47 +50,47 @@ export function EcosystemPage() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <h3 className="mb-3 text-sm font-semibold tracking-tight">Workflows</h3>
-          <input className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm" value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} />
-          <textarea className="mt-2 h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs" value={workflowDef} onChange={(e) => setWorkflowDef(e.target.value)} />
-          <button className="mt-2 h-8 rounded-md bg-indigo-600 px-3 text-sm font-medium text-white" onClick={() => createWorkflow.mutate()}>Create Workflow</button>
-          <div className="mt-3 space-y-2">{(workflows.data ?? []).length === 0 ? <EmptyState title="No workflows" body="Create workflow templates for repeatable runs." /> : (workflows.data ?? []).map((w) => <div key={String(w.id)} className="flex items-center justify-between rounded border border-slate-200 p-2 text-sm"><span>{String(w.name)}</span><button className="rounded border border-rose-300 px-2 py-1 text-xs text-rose-700" onClick={() => deleteWorkflow.mutate(String(w.id))}>Delete</button></div>)}</div>
+          <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Workflows</h3>
+          <input className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} />
+          <textarea className="mt-3 h-24 w-full rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-xs focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={workflowDef} onChange={(e) => setWorkflowDef(e.target.value)} />
+          <button className="mt-4 h-9 rounded-md bg-gray-900 px-4 text-sm font-medium text-white transition-colors hover:bg-gray-800" onClick={() => createWorkflow.mutate()}>Create Workflow</button>
+          <div className="mt-4 space-y-2">{(workflows.data ?? []).length === 0 ? <EmptyState title="No workflows" body="Create workflow templates for repeatable runs." /> : (workflows.data ?? []).map((w) => <div key={String(w.id)} className="flex items-center justify-between rounded border border-gray-200 p-2 text-sm"><span>{String(w.name)}</span><button className="rounded border border-red-200 px-3 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50" onClick={() => deleteWorkflow.mutate(String(w.id))}>Delete</button></div>)}</div>
         </Card>
 
         <Card>
-          <h3 className="mb-3 text-sm font-semibold tracking-tight">Policies</h3>
-          <input className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm" value={policyName} onChange={(e) => setPolicyName(e.target.value)} />
-          <textarea className="mt-2 h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs" value={policyDef} onChange={(e) => setPolicyDef(e.target.value)} />
-          <button className="mt-2 h-8 rounded-md bg-indigo-600 px-3 text-sm font-medium text-white" onClick={() => createPolicy.mutate()}>Create Policy</button>
-          <div className="mt-3 space-y-2">{(policies.data ?? []).length === 0 ? <EmptyState title="No policies" body="Create policy rules for governance." /> : (policies.data ?? []).map((p) => <div key={String(p.id)} className="flex items-center justify-between rounded border border-slate-200 p-2 text-sm"><span>{String(p.name)}</span><button className="rounded border border-rose-300 px-2 py-1 text-xs text-rose-700" onClick={() => deletePolicy.mutate(String(p.id))}>Delete</button></div>)}</div>
+          <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Policies</h3>
+          <input className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={policyName} onChange={(e) => setPolicyName(e.target.value)} />
+          <textarea className="mt-3 h-24 w-full rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-xs focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={policyDef} onChange={(e) => setPolicyDef(e.target.value)} />
+          <button className="mt-4 h-9 rounded-md bg-gray-900 px-4 text-sm font-medium text-white transition-colors hover:bg-gray-800" onClick={() => createPolicy.mutate()}>Create Policy</button>
+          <div className="mt-4 space-y-2">{(policies.data ?? []).length === 0 ? <EmptyState title="No policies" body="Create policy rules for governance." /> : (policies.data ?? []).map((p) => <div key={String(p.id)} className="flex items-center justify-between rounded border border-gray-200 p-2 text-sm"><span>{String(p.name)}</span><button className="rounded border border-red-200 px-3 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50" onClick={() => deletePolicy.mutate(String(p.id))}>Delete</button></div>)}</div>
         </Card>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <h3 className="mb-3 text-sm font-semibold tracking-tight">Secrets</h3>
-          <div className="grid gap-2 md:grid-cols-2">
-            <input className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" value={secretName} onChange={(e) => setSecretName(e.target.value)} />
-            <input className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" value={secretValue} placeholder="Secret value" onChange={(e) => setSecretValue(e.target.value)} />
+          <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Secrets</h3>
+          <div className="grid gap-3 md:grid-cols-2">
+            <input className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={secretName} onChange={(e) => setSecretName(e.target.value)} />
+            <input className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={secretValue} placeholder="Secret value" onChange={(e) => setSecretValue(e.target.value)} />
           </div>
-          <button className="mt-2 h-8 rounded-md bg-indigo-600 px-3 text-sm font-medium text-white" onClick={() => createSecret.mutate()}>Save Secret</button>
-          <div className="mt-3 space-y-2">{(secrets.data ?? []).length === 0 ? <EmptyState title="No secrets" body="Store named secrets for tool/provider usage." /> : (secrets.data ?? []).map((s) => <div key={String(s.name)} className="flex items-center justify-between rounded border border-slate-200 p-2 text-sm"><span>{String(s.name)}</span><button className="rounded border border-rose-300 px-2 py-1 text-xs text-rose-700" onClick={() => deleteSecret.mutate(String(s.name))}>Delete</button></div>)}</div>
+          <button className="mt-4 h-9 rounded-md bg-gray-900 px-4 text-sm font-medium text-white transition-colors hover:bg-gray-800" onClick={() => createSecret.mutate()}>Save Secret</button>
+          <div className="mt-4 space-y-2">{(secrets.data ?? []).length === 0 ? <EmptyState title="No secrets" body="Store named secrets for tool/provider usage." /> : (secrets.data ?? []).map((s) => <div key={String(s.name)} className="flex items-center justify-between rounded border border-gray-200 p-2 text-sm"><span>{String(s.name)}</span><button className="rounded border border-red-200 px-3 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50" onClick={() => deleteSecret.mutate(String(s.name))}>Delete</button></div>)}</div>
         </Card>
 
         <Card>
-          <h3 className="mb-3 text-sm font-semibold tracking-tight">Provider Configs</h3>
-          <div className="grid gap-2 md:grid-cols-2">
-            <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" value={provider} onChange={(e) => setProvider(e.target.value)}>
+          <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Provider Configs</h3>
+          <div className="grid gap-3 md:grid-cols-2">
+            <select className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={provider} onChange={(e) => setProvider(e.target.value)}>
               {providerIDs.map((id) => (
                 <option key={id} value={id}>{id}</option>
               ))}
             </select>
-            <input className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" value={providerName} onChange={(e) => setProviderName(e.target.value)} placeholder="Config name" />
+            <input className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={providerName} onChange={(e) => setProviderName(e.target.value)} placeholder="Config name" />
           </div>
-          <textarea className="mt-2 h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs" value={providerCfg} onChange={(e) => setProviderCfg(e.target.value)} />
-          {providerIDs.length === 0 ? <p className="mt-2 text-xs text-slate-600">No providers are configured. Set provider API keys and restart.</p> : null}
-          <button className="mt-2 h-8 rounded-md bg-indigo-600 px-3 text-sm font-medium text-white disabled:opacity-50" disabled={!provider} onClick={() => createProviderConfig.mutate()}>Save Provider Config</button>
-          <div className="mt-3 space-y-2">{(providerConfigs.data ?? []).length === 0 ? <EmptyState title="No provider configs" body="Add named provider profiles for routing and overrides." /> : (providerConfigs.data ?? []).map((p) => <div key={String(p.id)} className="flex items-center justify-between rounded border border-slate-200 p-2 text-sm"><span>{String(p.provider)} / {String(p.name)}</span><button className="rounded border border-rose-300 px-2 py-1 text-xs text-rose-700" onClick={() => deleteProviderConfig.mutate(String(p.id))}>Delete</button></div>)}</div>
+          <textarea className="mt-3 h-24 w-full rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-xs focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={providerCfg} onChange={(e) => setProviderCfg(e.target.value)} />
+          {providerIDs.length === 0 ? <p className="mt-2 text-xs text-gray-500">No providers are configured. Set provider API keys and restart.</p> : null}
+          <button className="mt-4 h-9 rounded-md bg-gray-900 px-4 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50" disabled={!provider} onClick={() => createProviderConfig.mutate()}>Save Provider Config</button>
+          <div className="mt-4 space-y-2">{(providerConfigs.data ?? []).length === 0 ? <EmptyState title="No provider configs" body="Add named provider profiles for routing and overrides." /> : (providerConfigs.data ?? []).map((p) => <div key={String(p.id)} className="flex items-center justify-between rounded border border-gray-200 p-2 text-sm"><span>{String(p.provider)} / {String(p.name)}</span><button className="rounded border border-red-200 px-3 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50" onClick={() => deleteProviderConfig.mutate(String(p.id))}>Delete</button></div>)}</div>
         </Card>
       </div>
     </div>

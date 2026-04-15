@@ -63,41 +63,41 @@ export function ToolsPage() {
       <SectionTitle title="Tools Console" subtitle="Create, edit, test, and govern built-in and custom tools." />
 
       <Card>
-        <h3 className="mb-3 text-sm font-semibold tracking-tight">{editingId ? 'Edit Tool' : 'Create Custom Tool'}</h3>
+        <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">{editingId ? 'Edit Tool' : 'Create Custom Tool'}</h3>
         <div className="grid gap-3 md:grid-cols-2">
-          <input className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Tool name (e.g. repo.scan)" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
-          <input className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Description" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
-          <select className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm" value={form.kind} onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value }))}>
+          <input className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" placeholder="Tool name (e.g. repo.scan)" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+          <input className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" placeholder="Description" value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
+          <select className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={form.kind} onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value }))}>
             <option value="shell_command">shell_command</option>
             <option value="builtin">builtin</option>
           </select>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={form.enabled} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} /> Enabled
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" className="rounded border-gray-300 text-gray-900 focus:ring-gray-900" checked={form.enabled} onChange={(e) => setForm((f) => ({ ...f, enabled: e.target.checked }))} /> Enabled
           </label>
         </div>
-        <textarea className="mt-3 h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs" value={form.input_schema} onChange={(e) => setForm((f) => ({ ...f, input_schema: e.target.value }))} />
-        <textarea className="mt-3 h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs" value={form.config_json} onChange={(e) => setForm((f) => ({ ...f, config_json: e.target.value }))} />
-        <div className="mt-3 flex gap-2">
-          <button className="h-9 rounded-md bg-indigo-600 px-3 text-sm font-medium text-white" onClick={() => (editingId ? updateTool.mutate(editingId) : createTool.mutate())}>{editingId ? 'Save Tool' : 'Create Tool'}</button>
-          {editingId ? <button className="h-9 rounded-md border border-slate-300 px-3 text-sm" onClick={() => setEditingId('')}>Cancel</button> : null}
+        <textarea className="mt-3 h-28 w-full rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-xs focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={form.input_schema} onChange={(e) => setForm((f) => ({ ...f, input_schema: e.target.value }))} />
+        <textarea className="mt-3 h-28 w-full rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-xs focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={form.config_json} onChange={(e) => setForm((f) => ({ ...f, config_json: e.target.value }))} />
+        <div className="mt-4 flex gap-2">
+          <button className="h-9 rounded-md bg-gray-900 px-4 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50" onClick={() => (editingId ? updateTool.mutate(editingId) : createTool.mutate())}>{editingId ? 'Save Tool' : 'Create Tool'}</button>
+          {editingId ? <button className="h-9 rounded-md border border-gray-300 px-4 text-sm transition-colors hover:bg-gray-50" onClick={() => setEditingId('')}>Cancel</button> : null}
         </div>
       </Card>
 
       <Card>
-        <h3 className="mb-3 text-sm font-semibold tracking-tight">Registered Tools</h3>
+        <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Registered Tools</h3>
         {defs.length === 0 ? <EmptyState title="No tools" body="Create your first custom tool." /> : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {defs.map((t) => (
-              <div key={t.id} className="rounded border border-slate-200 p-3">
+              <div key={t.id} className="group rounded-lg border border-gray-200 p-4 transition-colors hover:border-gray-300">
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="text-sm font-semibold">{t.name}</p>
-                    <p className="text-xs text-slate-600">{t.kind} | {t.is_builtin ? 'builtin' : 'custom'} | {t.enabled ? 'enabled' : 'disabled'}</p>
-                    <p className="mt-1 text-sm text-slate-700">{t.description}</p>
+                    <p className="text-sm font-semibold text-gray-900">{t.name}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{t.kind} | {t.is_builtin ? 'builtin' : 'custom'} | {t.enabled ? 'enabled' : 'disabled'}</p>
+                    <p className="mt-2 text-sm text-gray-700">{t.description}</p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
                     <button
-                      className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                      className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100"
                       onClick={() => {
                         setEditingId(t.id)
                         setForm({
@@ -112,8 +112,8 @@ export function ToolsPage() {
                     >
                       Edit
                     </button>
-                    {!t.is_builtin ? <button className="rounded-md border border-rose-300 px-2 py-1 text-xs text-rose-700" onClick={() => deleteTool.mutate(t.id)}>Delete</button> : null}
-                    <button className="rounded-md border border-slate-300 px-2 py-1 text-xs" onClick={() => testTool.mutate(t.id)}>Test</button>
+                    {!t.is_builtin ? <button className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-50" onClick={() => deleteTool.mutate(t.id)}>Delete</button> : null}
+                    <button className="rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-100" onClick={() => testTool.mutate(t.id)}>Test</button>
                   </div>
                 </div>
               </div>
@@ -123,10 +123,10 @@ export function ToolsPage() {
       </Card>
 
       <Card>
-        <h3 className="mb-3 text-sm font-semibold tracking-tight">Tool Test Runner</h3>
-        <input className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm" placeholder="Workspace path" value={workspacePath} onChange={(e) => setWorkspacePath(e.target.value)} />
-        <textarea className="mt-3 h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 font-mono text-xs" value={testInput} onChange={(e) => setTestInput(e.target.value)} />
-        <pre className="mt-3 max-h-72 overflow-auto rounded bg-slate-900 p-3 font-mono text-xs text-slate-100">{testOutput || 'Run a test to inspect output...'}</pre>
+        <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Tool Test Runner</h3>
+        <input className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" placeholder="Workspace path" value={workspacePath} onChange={(e) => setWorkspacePath(e.target.value)} />
+        <textarea className="mt-3 h-24 w-full rounded-md border border-gray-300 bg-white px-3 py-2 font-mono text-xs focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={testInput} onChange={(e) => setTestInput(e.target.value)} />
+        <pre className="mt-3 max-h-72 overflow-auto rounded bg-gray-900 p-4 font-mono text-xs text-gray-100">{testOutput || 'Run a test to inspect output...'}</pre>
       </Card>
     </div>
   )

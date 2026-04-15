@@ -1,11 +1,26 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import { CheckCircle2, ChevronDown, Clock3, Copy, ExternalLink, Filter, Layers, PauseCircle, Play, PlayCircle, RefreshCw, RotateCcw, ShieldCheck } from 'lucide-react'
+import React from 'react'
+import { useParams } from 'react-router-dom'
+import {
+  IconChevronDown,
+  IconGitBranch,
+  IconCloud,
+  IconFile,
+  IconLock,
+  IconClock,
+  IconPlayerPlay,
+  IconDatabase,
+  IconSearch,
+  IconCopy,
+  IconX,
+  IconArrowUpRight,
+  IconArrowDownLeft,
+} from '@tabler/icons-react'
 import { api } from '../lib/api'
-import { Card, EmptyState, StatusBadge } from '../components/Common'
-import type { Artifact, RunTelemetry, ToolCall, TraceSpan } from '../lib/types'
+import type { Artifact, TraceSpan } from '../lib/types'
+
+import { formatDistanceToNow } from 'date-fns'
 
 type TabId = 'transcript' | 'debug' | 'events'
 
@@ -18,7 +33,7 @@ type EventRow = {
   parsed: Record<string, unknown> | string
   actor: ActorLaneId
   duration_ms?: number
-  usage_label?: string
+  usage?: { inTokens: number; outTokens: number } | null
 }
 
 type DisplayArtifact = Artifact & {
@@ -28,51 +43,47 @@ type DisplayArtifact = Artifact & {
 
 type ActorLaneId = 'orchestrator' | 'tools' | 'system' | 'user'
 
-const laneMeta: Record<ActorLaneId, { label: string; tone: string; barTone: string }> = {
-  orchestrator: { label: 'Orchestrator', tone: 'bg-indigo-50 text-indigo-700 border-indigo-200', barTone: 'bg-indigo-400' },
-  tools: { label: 'Tools', tone: 'bg-cyan-50 text-cyan-700 border-cyan-200', barTone: 'bg-cyan-400' },
-  system: { label: 'System', tone: 'bg-emerald-50 text-emerald-700 border-emerald-200', barTone: 'bg-emerald-400' },
-  user: { label: 'User', tone: 'bg-violet-50 text-violet-700 border-violet-200', barTone: 'bg-violet-400' },
+const roleColors: Record<string, string> = {
+  Running: 'bg-[#e5e7eb] text-gray-700',
+  User: 'bg-[#9333ea] text-white',
+  Agent: 'bg-[#3b82f6] text-white',
+  Bash: 'bg-[#db2777] text-white',
+  Write: 'bg-[#e11d48] text-white',
+  System: 'bg-gray-200 text-gray-700',
+}
+
+function getRoleColor(role: string) {
+  if (roleColors[role]) return roleColors[role]
+  // Provide consistent colors for other generic tools based on their name length
+  const hash = role.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)
+  const colors = [
+    'bg-[#14b8a6] text-white', // teal
+    'bg-[#8b5cf6] text-white', // violet
+    'bg-[#f59e0b] text-white', // amber
+    'bg-[#06b6d4] text-white', // cyan
+    'bg-[#ef4444] text-white', // red
+    'bg-[#10b981] text-white', // emerald
+  ]
+  return colors[hash % colors.length]
 }
 
 export function RunDetailPage() {
   const { id = '' } = useParams()
-  const navigate = useNavigate()
   const qc = useQueryClient()
   const [activeTab, setActiveTab] = useState<TabId>('transcript')
-  const [filterText, setFilterText] = useState('')
+  const [filterText] = useState('')
   const [steerText, setSteerText] = useState('')
-  const [selectedSpan, setSelectedSpan] = useState<TraceSpan | null>(null)
-  const [selectedToolCallID, setSelectedToolCallID] = useState('')
+  const [expandedRowID, setExpandedRowID] = useState('')
+  const [expandedEventRowID, setExpandedEventRowID] = useState('')
+  const [isArtifactsModalOpen, setIsArtifactsModalOpen] = useState(false)
   const activeActors: ActorLaneId[] = ['orchestrator', 'tools', 'system', 'user']
 
+  const steer = useMutation({ mutationFn: () => api.steerRun(id, { message: steerText }), onSuccess: () => setSteerText('') })
+
   const runQ = useQuery({ queryKey: ['run', id], queryFn: () => api.getRun(id), enabled: Boolean(id), refetchInterval: 1800 })
+  const agentQ = useQuery({ queryKey: ['agent', runQ.data?.agent_id], queryFn: () => api.listAgents().then(agents => agents.find(a => a.id === runQ.data?.agent_id)), enabled: Boolean(runQ.data?.agent_id) })
   const telemetryQ = useQuery({ queryKey: ['telemetry', id], queryFn: () => api.getRunTelemetry(id), enabled: Boolean(id), refetchInterval: 1800 })
   const artifactsQ = useQuery({ queryKey: ['artifacts', id], queryFn: () => api.getRunArtifacts(id), enabled: Boolean(id), refetchInterval: 2500 })
-
-  const interrupt = useMutation({ mutationFn: () => api.interruptRun(id), onSuccess: () => qc.invalidateQueries({ queryKey: ['run', id] }) })
-  const resume = useMutation({ mutationFn: () => api.resumeRun(id), onSuccess: () => qc.invalidateQueries({ queryKey: ['run', id] }) })
-  const approve = useMutation({ mutationFn: () => api.approveRun(id), onSuccess: () => qc.invalidateQueries({ queryKey: ['telemetry', id] }) })
-  const steer = useMutation({ mutationFn: () => api.steerRun(id, { message: steerText }), onSuccess: () => setSteerText('') })
-  const restart = useMutation({
-    mutationFn: async () => {
-      if (!runQ.data) throw new Error('Run not loaded')
-      return api.createRun({
-        agent_id: runQ.data.agent_id,
-        task: runQ.data.task,
-        provider: runQ.data.provider,
-        model: runQ.data.model,
-        max_steps: runQ.data.max_steps,
-      })
-    },
-    onSuccess: (out) => {
-      navigate(`/runs/${out.id}`)
-    },
-  })
-  const replay = useMutation({
-    mutationFn: (args: { resumeFromStep: number }) => api.replayRun(id, { resume_from_step: args.resumeFromStep }),
-    onSuccess: (out) => navigate(`/runs/${out.id}`),
-  })
 
   useEffect(() => {
     if (!id) return
@@ -86,10 +97,6 @@ export function RunDetailPage() {
   }, [id, qc])
 
   const telemetry = telemetryQ.data
-  const selectedToolCall = useMemo(() => {
-    if (!selectedToolCallID) return null
-    return (telemetry?.tool_calls ?? []).find((tc) => tc.id === selectedToolCallID) ?? null
-  }, [telemetry?.tool_calls, selectedToolCallID])
 
   const stepDurationByID = useMemo(() => {
     const out: Record<string, number> = {}
@@ -125,17 +132,9 @@ export function RunDetailPage() {
       parsed: tryParseJSON(String(ev.payload_json || '')),
       actor: actorFromEventType(String(ev.event_type)),
       duration_ms: stepDurationByID[String(ev.step_id || '')] || toolDurationByStepID[String(ev.step_id || '')],
-      usage_label: usageLabelFromPayload(tryParseJSON(String(ev.payload_json || ''))),
+      usage: usageLabelFromPayload(tryParseJSON(String(ev.payload_json || ''))),
     }))
   }, [telemetry, stepDurationByID, toolDurationByStepID])
-
-  const stepIndexByID = useMemo(() => {
-    const out: Record<string, number> = {}
-    for (const s of telemetry?.steps ?? []) {
-      out[s.id] = s.idx
-    }
-    return out
-  }, [telemetry?.steps])
 
   const filteredEvents = useMemo(() => {
     let out = eventRows.filter((ev) => activeActors.includes(ev.actor))
@@ -143,92 +142,6 @@ export function RunDetailPage() {
     const q = filterText.toLowerCase()
     return out.filter((ev) => `${ev.event_type} ${JSON.stringify(ev.parsed)}`.toLowerCase().includes(q))
   }, [eventRows, filterText, activeActors])
-
-  const spans = useMemo(() => {
-    return (telemetry?.spans ?? [])
-      .map((s) => ({ ...s, __start: parseTimeMs(s.started_at), __end: parseTimeMs(s.ended_at), __actor: actorFromSpan(s) }))
-      .filter((s) => Number.isFinite(s.__start))
-      .filter((s) => activeActors.includes(s.__actor))
-  }, [telemetry, activeActors])
-
-  const timeline = useMemo(() => {
-    if (spans.length === 0) return null
-    const min = Math.min(...spans.map((s) => s.__start))
-    const max = Math.max(...spans.map((s) => s.__end || s.__start))
-    const total = Math.max(1, max - min)
-
-    return {
-      min,
-      max,
-      total,
-      lanes: [
-        { id: 'orchestrator' as ActorLaneId, label: laneMeta.orchestrator.label, spans: spans.filter((s) => s.__actor === 'orchestrator') },
-        { id: 'tools' as ActorLaneId, label: laneMeta.tools.label, spans: spans.filter((s) => s.__actor === 'tools') },
-        { id: 'system' as ActorLaneId, label: laneMeta.system.label, spans: spans.filter((s) => s.__actor === 'system') },
-        { id: 'user' as ActorLaneId, label: laneMeta.user.label, spans: spans.filter((s) => s.__actor === 'user') },
-      ],
-    }
-  }, [spans])
-
-  const metrics = useMemo(() => {
-    const run = runQ.data
-    const started = parseTimeMs(run?.started_at) || parseTimeMs(run?.created_at)
-    const completed = parseTimeMs(run?.completed_at)
-    const latestEvent = eventRows.length > 0 ? parseTimeMs(eventRows[eventRows.length - 1].created_at) : NaN
-    const terminal = run?.status === 'completed' || run?.status === 'failed' || run?.status === 'cancelled'
-    const ended = Number.isFinite(completed) ? completed : (terminal ? latestEvent : Date.now())
-    const elapsedMs = Number.isFinite(started) && Number.isFinite(ended) && ended >= started ? ended - started : 0
-
-    let inTokens = 0
-    let outTokens = 0
-    for (const ev of eventRows) {
-      if (ev.event_type !== 'model.response') continue
-      if (typeof ev.parsed !== 'object' || ev.parsed === null) continue
-      const usage = (ev.parsed as Record<string, unknown>).usage
-      if (!usage || typeof usage !== 'object') continue
-      const rec = usage as Record<string, unknown>
-      inTokens += Number(rec.input_tokens || 0)
-      outTokens += Number(rec.output_tokens || 0)
-    }
-
-    return {
-      elapsedLabel: formatDuration(elapsedMs),
-      inTokens,
-      outTokens,
-      stepCount: telemetry?.steps?.length ?? 0,
-      toolCount: telemetry?.tool_calls?.length ?? 0,
-    }
-  }, [runQ.data, eventRows, telemetry?.steps?.length, telemetry?.tool_calls?.length])
-
-  const sessionLifecycle = useMemo(() => {
-    const status = runQ.data?.status || 'unknown'
-    const stopReason = detectStopReason(status, eventRows)
-    return { status, stopReason }
-  }, [runQ.data?.status, eventRows])
-
-  const runStartMs = useMemo(() => {
-    const runStart = parseTimeMs(runQ.data?.started_at) || parseTimeMs(runQ.data?.created_at)
-    if (Number.isFinite(runStart)) return runStart
-    if (eventRows.length === 0) return NaN
-    const first = parseTimeMs(eventRows[0].created_at)
-    return Number.isFinite(first) ? first : NaN
-  }, [runQ.data?.started_at, runQ.data?.created_at, eventRows])
-
-  const finalResult = useMemo(() => {
-    const completed = [...eventRows].reverse().find((e) => e.event_type === 'run.completed')
-    if (completed && typeof completed.parsed === 'object' && completed.parsed !== null) {
-      const parsed = completed.parsed as Record<string, unknown>
-      if (typeof parsed.result === 'string' && parsed.result.trim()) return parsed.result
-      if (typeof parsed.text === 'string' && parsed.text.trim()) return parsed.text
-    }
-    const lastModelResponse = [...eventRows].reverse().find((e) => e.event_type === 'model.response')
-    if (lastModelResponse && typeof lastModelResponse.parsed === 'object' && lastModelResponse.parsed !== null) {
-      const parsed = lastModelResponse.parsed as Record<string, unknown>
-      if (typeof parsed.text === 'string' && parsed.text.trim()) return parsed.text
-      if (typeof parsed.result === 'string' && parsed.result.trim()) return parsed.result
-    }
-    return ''
-  }, [eventRows])
 
   const displayArtifacts = useMemo<DisplayArtifact[]>(() => {
     const persisted = artifactsQ.data ?? []
@@ -271,527 +184,470 @@ export function RunDetailPage() {
     return out
   }, [displayArtifacts])
 
-  const finalOutcomeArtifacts = useMemo(() => {
-    const completed = [...eventRows].reverse().find((e) => e.event_type === 'run.completed')
-    const completedStepID = completed?.step_id || ''
-    if (completedStepID && stepArtifactsByStepID[completedStepID]?.length) {
-      return stepArtifactsByStepID[completedStepID]
-    }
-    if (displayArtifacts.length === 0) return []
-    const imageArtifacts = displayArtifacts.filter((a) => a.mime_type.startsWith('image/'))
-    if (imageArtifacts.length > 0) return imageArtifacts.slice(0, 3)
-    return displayArtifacts.slice(0, 3)
-  }, [eventRows, stepArtifactsByStepID, displayArtifacts])
+  const spans = useMemo(() => {
+    return (telemetry?.spans ?? [])
+      .map((s) => ({ ...s, __start: parseTimeMs(s.started_at), __end: parseTimeMs(s.ended_at), __actor: actorFromSpan(s) }))
+      .filter((s) => Number.isFinite(s.__start))
+      .filter((s) => activeActors.includes(s.__actor))
+  }, [telemetry, activeActors])
 
-  if (!id) return <EmptyState title="Missing run ID" body="Select a run from the runs list." />
+  const timeline = useMemo(() => {
+    if (spans.length === 0) return null
+    const min = Math.min(...spans.map((s) => s.__start))
+    const max = Math.max(...spans.map((s) => s.__end || s.__start))
+    const total = Math.max(1, max - min)
+
+    return { min, max, total, spans }
+  }, [spans])
+
+  const metrics = useMemo(() => {
+    const run = runQ.data
+    const started = parseTimeMs(run?.started_at) || parseTimeMs(run?.created_at)
+    const completed = parseTimeMs(run?.completed_at)
+    const latestEvent = eventRows.length > 0 ? parseTimeMs(eventRows[eventRows.length - 1].created_at) : NaN
+    const terminal = run?.status === 'completed' || run?.status === 'failed' || run?.status === 'cancelled'
+    const ended = Number.isFinite(completed) ? completed : (terminal ? latestEvent : Date.now())
+    const elapsedMs = Number.isFinite(started) && Number.isFinite(ended) && ended >= started ? ended - started : 0
+
+    let inTokens = 0
+    let outTokens = 0
+    for (const ev of eventRows) {
+      if (ev.event_type !== 'model.response') continue
+      if (typeof ev.parsed !== 'object' || ev.parsed === null) continue
+      const usage = (ev.parsed as Record<string, unknown>).usage
+      if (!usage || typeof usage !== 'object') continue
+      const rec = usage as Record<string, unknown>
+      inTokens += Number(rec.input_tokens || 0)
+      outTokens += Number(rec.output_tokens || 0)
+    }
+
+    return {
+      elapsedLabel: formatDuration(elapsedMs),
+      inTokens,
+      outTokens,
+      stepCount: telemetry?.steps?.length ?? 0,
+      toolCount: telemetry?.tool_calls?.length ?? 0,
+    }
+  }, [runQ.data, eventRows, telemetry?.steps?.length, telemetry?.tool_calls?.length])
+
+  const runStartMs = useMemo(() => {
+    const runStart = parseTimeMs(runQ.data?.started_at) || parseTimeMs(runQ.data?.created_at)
+    if (Number.isFinite(runStart)) return runStart
+    if (eventRows.length === 0) return NaN
+    const first = parseTimeMs(eventRows[0].created_at)
+    return Number.isFinite(first) ? first : NaN
+  }, [runQ.data?.started_at, runQ.data?.created_at, eventRows])
+
+  if (!id) return null
+
+  const taskTitle = runQ.data?.task || 'Session Detail'
+  const statusLabel = runQ.data?.status || 'Unknown'
 
   return (
-    <div className="min-w-0 space-y-3.5">
-      <Card>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 space-y-2">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Session</p>
-            <h1 className="truncate text-xl font-semibold text-slate-900">{runQ.data?.task || 'Session Detail'}</h1>
-            <p className="font-mono text-xs text-slate-500">{id}</p>
-            <div className="flex flex-wrap items-center gap-2 pt-0.5 text-xs text-slate-600">
-              {sessionLifecycle.stopReason ? <span>Stop reason: <span className="font-medium text-slate-700">{sessionLifecycle.stopReason}</span></span> : null}
+    <div className="flex flex-col h-[100vh] bg-[#fafafa] text-sm -mt-5 -mx-6 -mb-5 rounded-tl-xl overflow-hidden shadow-sm border-l border-t border-gray-200">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 bg-white">
+        <div>
+          <div className="flex items-center gap-2 text-gray-500 text-sm mb-1.5 cursor-pointer">
+            <span className="hover:text-gray-700 transition-colors">Runs</span>
+            <span className="text-gray-300">/</span>
+            <span className="hover:text-gray-700 transition-colors flex items-center gap-1 font-medium text-gray-600">
+              {id}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-semibold text-gray-900 tracking-tight">{taskTitle}</h1>
+            <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-[11px] font-medium border border-gray-200 shadow-sm capitalize">
+              {statusLabel}
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            <input 
+              type="text" 
+              value={steerText}
+              onChange={(e) => setSteerText(e.target.value)}
+              placeholder="Message agent..." 
+              className="h-9 px-3 rounded-md border border-gray-300 text-sm w-64 focus:outline-none focus:ring-1 focus:ring-gray-400 focus:border-gray-400 bg-white shadow-sm"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && steerText) {
+                  steer.mutate()
+                }
+              }}
+            />
+          </div>
+          <button className="flex items-center gap-1 border border-gray-200 bg-white hover:bg-gray-50 px-3 py-1.5 rounded-md text-sm font-medium text-gray-700 shadow-sm transition-colors">
+            Actions
+            <IconChevronDown size={16} className="text-gray-400" />
+          </button>
+        </div>
+      </div>
+
+      {/* Tags row */}
+      <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-gray-200 bg-[#fafafa]/50 text-xs text-gray-600">
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-gray-200 bg-white shadow-sm font-medium">
+          <IconGitBranch size={14} className="text-gray-400" /> {agentQ.data?.name || runQ.data?.agent_id || 'default-agent'}
+        </div>
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-gray-200 bg-white shadow-sm font-medium">
+          <IconCloud size={14} className="text-gray-400" /> env
+        </div>
+        <button 
+          onClick={() => setIsArtifactsModalOpen(true)}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-gray-200 bg-white shadow-sm font-medium hover:bg-gray-50 transition-colors"
+        >
+          <IconFile size={14} className="text-gray-400" /> {displayArtifacts.length} {displayArtifacts.length === 1 ? 'file' : 'files'}
+        </button>
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-gray-200 bg-white shadow-sm font-medium text-gray-500">
+          <IconLock size={14} className="text-gray-400" /> production-vault
+        </div>
+        
+        <div className="flex items-center gap-1.5 text-gray-500 ml-4 font-medium">
+          <IconClock size={14} /> {runQ.data?.created_at ? formatDistanceToNow(new Date(runQ.data.created_at), { addSuffix: true }) : 'Just now'}
+        </div>
+        <div className="flex items-center gap-1.5 text-gray-500 ml-2 font-medium">
+          <IconPlayerPlay size={14} /> {metrics.elapsedLabel}
+        </div>
+        <div className="flex items-center gap-1.5 text-gray-500 ml-2 font-medium">
+          <IconDatabase size={14} /> {(metrics.inTokens / 1000).toFixed(1)}k / {(metrics.outTokens / 1000).toFixed(1)}k ({metrics.inTokens + metrics.outTokens > 0 ? Math.round((metrics.outTokens / (metrics.inTokens + metrics.outTokens)) * 100) : 0}%)
+        </div>
+      </div>
+
+      {/* Main content body */}
+      <div className="flex-1 overflow-auto bg-[#fafafa]">
+        {/* Tabs */}
+        <div className="flex items-center justify-between border-b border-gray-200 px-6 bg-[#fafafa] pt-3 sticky top-0 z-10">
+          <div className="flex items-center gap-6">
+            <button
+              onClick={() => setActiveTab('transcript')}
+              className={`pb-2 text-sm font-medium transition-colors ${activeTab === 'transcript' ? 'text-gray-900 border-b-[3px] border-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              Transcript
+            </button>
+            <button
+              onClick={() => setActiveTab('debug')}
+              className={`pb-2 text-sm font-medium transition-colors ${activeTab === 'debug' ? 'text-gray-900 border-b-[3px] border-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              Debug
+            </button>
+            <button
+              onClick={() => setActiveTab('events')}
+              className={`pb-2 text-sm font-medium transition-colors flex items-center gap-1 ${activeTab === 'events' ? 'text-gray-900 border-b-[3px] border-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              All events <IconChevronDown size={14} />
+            </button>
+            <div className="relative pb-2 group">
+               <IconSearch size={16} className="text-gray-400 group-hover:text-gray-600 transition-colors cursor-pointer" />
             </div>
           </div>
-          {runQ.data ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusBadge status={runQ.data.status || 'unknown'} />
-              {(runQ.data.provider || runQ.data.model) ? <MetaChip label="Provider" value={`${runQ.data.provider || ''}${runQ.data.provider && runQ.data.model ? ':' : ''}${runQ.data.model || ''}`} /> : null}
-              <div className="inline-flex overflow-hidden rounded-md border border-slate-200 bg-white text-xs text-slate-700">
-                <span className="inline-flex items-center gap-1 border-r border-slate-200 px-2.5 py-1">
-                  <span className="text-slate-500">Duration</span>
-                  <span className="font-medium text-slate-900">{metrics.elapsedLabel}</span>
-                </span>
-                <span className="inline-flex items-center gap-1 border-r border-slate-200 px-2.5 py-1">
-                  <span className="text-slate-500">Steps</span>
-                  <span className="font-medium text-slate-900">{metrics.stepCount}</span>
-                </span>
-                <span className="inline-flex items-center gap-1 border-r border-slate-200 px-2.5 py-1">
-                  <span className="text-slate-500">Tokens</span>
-                  <span className="font-medium text-slate-900">{metrics.inTokens + metrics.outTokens}</span>
-                </span>
-                <span className="inline-flex items-center gap-1 px-2.5 py-1">
-                  <span className="text-slate-500">Artifacts</span>
-                  <span className="font-medium text-slate-900">{displayArtifacts.length}</span>
-                </span>
+          <div className="flex items-center gap-4 pb-2">
+            <button className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800 transition-colors">
+              <IconCopy size={14} /> Copy all
+            </button>
+          </div>
+        </div>
+
+        <div className={`p-6 mx-auto ${activeTab === 'transcript' ? 'max-w-6xl' : 'max-w-5xl'}`}>
+          {activeTab === 'transcript' ? (
+            <>
+              {/* Timeline Component */}
+              <div className="mb-8 p-3 bg-white rounded-lg border border-gray-200 shadow-sm flex items-center">
+                <div className="w-full h-10 bg-gray-50 rounded border border-gray-200 relative overflow-hidden flex items-center">
+                  {timeline && timeline.spans.map(span => {
+                    const start = ((span.__start - timeline.min) / timeline.total) * 100
+                    const width = Math.max(0.5, (((span.__end || span.__start) - span.__start) / timeline.total) * 100)
+                    const bg = span.__actor === 'tools' ? 'bg-[#F472B6]' : span.__actor === 'orchestrator' ? 'bg-[#60A5FA]' : 'bg-gray-300'
+                    return (
+                      <div
+                        key={span.id}
+                        className={`absolute h-6 rounded-[3px] opacity-80 hover:opacity-100 transition-opacity cursor-pointer shadow-sm ${bg}`}
+                        style={{ left: `${start}%`, width: `${width}%` }}
+                        title={span.name}
+                      />
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Agent Tabs */}
+              <div className="flex items-center gap-6 border-b border-gray-200 mb-6 max-w-5xl mx-auto">
+                <button className="text-sm font-medium text-gray-900 border-b-[3px] border-gray-900 pb-2 -mb-[1.5px]">Orchestrator</button>
+              </div>
+
+              {/* Transcript List */}
+              <div className="space-y-4 max-w-5xl mx-auto">
+                {filteredEvents.map((ev) => {
+                  const role = mapEventToRole(ev)
+                  const line = transcriptLine(ev)
+                  const offset = Number.isFinite(runStartMs) ? Math.max(0, parseTimeMs(ev.created_at) - runStartMs) : 0
+                  const expanded = expandedRowID === ev.id
+                  const rowArtifacts = stepArtifactsByStepID[ev.step_id] ?? []
+                  
+                  return (
+                    <div key={ev.id} className={`group border transition-colors rounded-md -mx-3 px-3 py-2 ${expanded ? 'bg-white border-gray-200 shadow-sm' : 'border-transparent hover:border-gray-200 hover:bg-white hover:shadow-sm'}`}>
+                      <div className="flex items-start gap-3 cursor-pointer" onClick={() => setExpandedRowID(expanded ? '' : ev.id)}>
+                        <div className="w-[68px] shrink-0 pt-0.5 text-right flex justify-end">
+                          <span className={`inline-flex items-center justify-center px-2 py-0.5 text-[10px] uppercase tracking-wide font-bold rounded shadow-sm ${getRoleColor(role)}`}>
+                            {role}
+                          </span>
+                        </div>
+                        <div className="flex-1 min-w-0 pt-0.5">
+                          <div className="text-sm text-gray-800 break-words font-medium leading-relaxed">
+                            {line.title}
+                          </div>
+                          {line.subtitle && <div className="text-xs text-gray-500 mt-0.5 line-clamp-2">{line.subtitle}</div>}
+                        </div>
+                        <div className={`shrink-0 flex items-center gap-1.5 text-[11px] text-gray-400 font-mono pt-1 transition-opacity ${expanded ? 'opacity-100' : 'opacity-100'}`}>
+                          {ev.usage ? (
+                            <span className="flex items-center gap-1">
+                              <span className="flex items-center"><IconArrowUpRight size={12} className="text-gray-400" />{ev.usage.inTokens}</span>
+                              <span className="text-gray-300">/</span>
+                              <span className="flex items-center"><IconArrowDownLeft size={12} className="text-gray-400" />{ev.usage.outTokens}</span>
+                              <span className="mx-1">•</span>
+                            </span>
+                          ) : null}
+                          {ev.duration_ms ? <span>{formatDuration(ev.duration_ms)}</span> : null}
+                          {offset > 0 ? <span> • +{formatDuration(offset)}</span> : null}
+                          <IconChevronDown size={14} className={`transition-transform ml-1 ${expanded ? 'rotate-180' : ''}`} />
+                        </div>
+                      </div>
+                      
+                      {/* Expanded View */}
+                      {expanded && (
+                        <div className="ml-[80px] mt-3 space-y-3 p-3 bg-[#fafafa] rounded-md border border-gray-200">
+                          <div className="space-y-1">
+                            <p className="text-[11px] text-gray-500">{humanizeEventType(ev.event_type)} • {new Date(ev.created_at).toLocaleString()}</p>
+                            <pre className="max-h-64 overflow-auto rounded bg-gray-900 p-2 font-mono text-[11px] text-gray-100">{JSON.stringify(ev.parsed, null, 2)}</pre>
+                          </div>
+                          <StepArtifacts runID={id} artifacts={rowArtifacts} />
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </>
+          ) : null}
+
+          {activeTab === 'debug' ? (
+             <div className="space-y-6">
+                <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
+                  <h3 className="text-sm font-semibold tracking-tight text-gray-900 mb-4">Run Details</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1.5">Agent ID</p>
+                      <p className="font-mono text-xs text-gray-900 bg-gray-50 p-2 rounded border border-gray-200">{runQ.data?.agent_id || '-'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1.5">Provider:Model</p>
+                      <p className="font-mono text-xs text-gray-900 bg-gray-50 p-2 rounded border border-gray-200">{runQ.data?.provider || '-'}:{runQ.data?.model || '-'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1.5">Workspace</p>
+                      <p className="font-mono text-xs text-gray-900 bg-gray-50 p-2 rounded border border-gray-200 truncate" title={runQ.data?.workspace_path}>{runQ.data?.workspace_path || 'None'}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1.5">Status</p>
+                      <p className="font-mono text-xs text-gray-900 bg-gray-50 p-2 rounded border border-gray-200">{runQ.data?.status || '-'}</p>
+                    </div>
+                  </div>
+                  <details className="text-xs group">
+                    <summary className="cursor-pointer text-gray-600 hover:text-gray-900 font-medium inline-flex items-center gap-1 transition-colors">
+                      <IconChevronDown size={14} className="group-open:-rotate-180 transition-transform" />
+                      View Raw Run Object
+                    </summary>
+                    <pre className="max-h-64 overflow-auto rounded-lg bg-gray-900 p-4 font-mono text-[11px] text-gray-100 mt-3 shadow-inner">{JSON.stringify(runQ.data, null, 2)}</pre>
+                  </details>
+                </div>
+                
+                <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                  <div className="px-5 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold tracking-tight text-gray-900">Telemetry Steps</h3>
+                    <span className="text-xs font-semibold bg-white border border-gray-200 text-gray-700 px-2.5 py-0.5 rounded-full shadow-sm">{telemetry?.steps?.length || 0}</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm whitespace-nowrap">
+                      <thead className="bg-white border-b border-gray-100 text-gray-500 text-xs">
+                        <tr>
+                          <th className="px-5 py-3 font-medium">Idx</th>
+                          <th className="px-5 py-3 font-medium">Step ID</th>
+                          <th className="px-5 py-3 font-medium">Type</th>
+                          <th className="px-5 py-3 font-medium">Status</th>
+                          <th className="px-5 py-3 font-medium">Duration</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {telemetry?.steps?.length === 0 ? (
+                          <tr><td colSpan={5} className="px-5 py-6 text-center text-gray-500 text-sm">No steps recorded</td></tr>
+                        ) : telemetry?.steps?.map(s => (
+                          <tr key={s.id} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-5 py-3 text-gray-500">{s.idx}</td>
+                            <td className="px-5 py-3 font-mono text-xs text-gray-600">{s.id}</td>
+                            <td className="px-5 py-3 font-medium text-gray-700">{s.step_type}</td>
+                            <td className="px-5 py-3">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium capitalize ${s.status === 'completed' ? 'bg-green-50 text-green-700 border border-green-200' : s.status === 'failed' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-gray-100 text-gray-700 border border-gray-200'}`}>
+                                {s.status}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3 text-gray-500 font-mono text-xs">{formatDuration(stepDurationByID[s.id] || 0)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                  <div className="px-5 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold tracking-tight text-gray-900">Tool Calls</h3>
+                    <span className="text-xs font-semibold bg-white border border-gray-200 text-gray-700 px-2.5 py-0.5 rounded-full shadow-sm">{telemetry?.tool_calls?.length || 0}</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm whitespace-nowrap">
+                      <thead className="bg-white border-b border-gray-100 text-gray-500 text-xs">
+                        <tr>
+                          <th className="px-5 py-3 font-medium">Tool Name</th>
+                          <th className="px-5 py-3 font-medium">Step ID</th>
+                          <th className="px-5 py-3 font-medium">Status</th>
+                          <th className="px-5 py-3 font-medium">Duration</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {telemetry?.tool_calls?.length === 0 ? (
+                          <tr><td colSpan={4} className="px-5 py-6 text-center text-gray-500 text-sm">No tool calls recorded</td></tr>
+                        ) : telemetry?.tool_calls?.map(tc => {
+                           const dur = parseTimeMs(tc.ended_at) - parseTimeMs(tc.started_at)
+                           return (
+                             <tr key={tc.id} className="hover:bg-gray-50 transition-colors">
+                               <td className="px-5 py-3 font-medium text-gray-900">{tc.tool_name}</td>
+                               <td className="px-5 py-3 font-mono text-xs text-gray-500">{tc.step_id}</td>
+                               <td className="px-5 py-3">
+                                 <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium capitalize ${tc.status === 'completed' ? 'bg-green-50 text-green-700 border border-green-200' : tc.status === 'failed' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-gray-100 text-gray-700 border border-gray-200'}`}>
+                                   {tc.status}
+                                 </span>
+                               </td>
+                               <td className="px-5 py-3 text-gray-500 font-mono text-xs">{formatDuration(Number.isFinite(dur) && dur > 0 ? dur : 0)}</td>
+                             </tr>
+                           )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+             </div>
+          ) : null}
+
+          {activeTab === 'events' ? (
+            <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm whitespace-nowrap">
+                  <thead className="bg-gray-50 border-b border-gray-200 text-gray-500">
+                    <tr>
+                      <th className="px-4 py-3 font-medium">Seq</th>
+                      <th className="px-4 py-3 font-medium">Time</th>
+                      <th className="px-4 py-3 font-medium">Actor</th>
+                      <th className="px-4 py-3 font-medium">Event Type</th>
+                      <th className="px-4 py-3 font-medium">Step ID</th>
+                      <th className="px-4 py-3 font-medium">Payload Preview</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {eventRows.length === 0 ? (
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No events recorded yet.</td></tr>
+                    ) : eventRows.map((ev) => {
+                       const offset = Number.isFinite(runStartMs) ? Math.max(0, parseTimeMs(ev.created_at) - runStartMs) : 0
+                       const role = mapEventToRole(ev)
+                       const isExpanded = expandedEventRowID === ev.id
+                       return (
+                         <React.Fragment key={ev.id}>
+                           <tr className={`cursor-pointer transition-colors ${isExpanded ? 'bg-gray-50' : 'hover:bg-gray-50/50'}`} onClick={() => setExpandedEventRowID(isExpanded ? '' : ev.id)}>
+                             <td className="px-4 py-2 text-gray-500 font-mono text-xs">{ev.seq}</td>
+                             <td className="px-4 py-2 text-gray-500 font-mono text-xs">+{formatDuration(offset)}</td>
+                             <td className="px-4 py-2">
+                               <span className={`inline-flex items-center justify-center px-2 py-0.5 text-[10px] uppercase tracking-wide font-bold rounded shadow-sm ${getRoleColor(role)}`}>
+                                 {role}
+                               </span>
+                             </td>
+                             <td className="px-4 py-2 font-medium text-gray-700">{ev.event_type}</td>
+                             <td className="px-4 py-2 text-gray-500 font-mono text-xs">{ev.step_id || '-'}</td>
+                             <td className="px-4 py-2">
+                               <div className="flex items-center gap-2">
+                                 <span className="text-gray-400 font-mono text-xs truncate max-w-xs block">{truncateText(JSON.stringify(ev.parsed), 80)}</span>
+                                 <IconChevronDown size={14} className={`text-gray-400 transition-transform ml-auto ${isExpanded ? 'rotate-180' : ''}`} />
+                               </div>
+                             </td>
+                           </tr>
+                           {isExpanded && (
+                             <tr>
+                               <td colSpan={6} className="px-4 pb-4 pt-1 bg-gray-50 border-b border-gray-100">
+                                 <div className="ml-8 border-l-2 border-gray-200 pl-4">
+                                   <p className="text-[11px] text-gray-500 mb-2">Created at {new Date(ev.created_at).toLocaleString()}</p>
+                                   <pre className="max-h-64 overflow-auto rounded bg-gray-900 p-3 font-mono text-[11px] text-gray-100 shadow-inner whitespace-pre-wrap">{JSON.stringify(ev.parsed, null, 2)}</pre>
+                                 </div>
+                               </td>
+                             </tr>
+                           )}
+                         </React.Fragment>
+                       )
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
           ) : null}
         </div>
-      </Card>
+      </div>
 
-      {finalResult ? (
-        <Card>
-          <div className="flex items-start gap-2">
-            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
-            <div className="min-w-0">
-              <p className="text-xs font-medium uppercase tracking-wide text-emerald-700">Run Outcome</p>
-              <FinalResultBody value={finalResult} />
-              {finalOutcomeArtifacts.length > 0 ? (
-                <div className="mt-2 space-y-2">
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-600">Output Artifacts</p>
-                  {finalOutcomeArtifacts.map((artifact) => (
+      {isArtifactsModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[80vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 bg-gray-50/80">
+              <div className="flex items-center gap-2">
+                <IconFile size={18} className="text-gray-500" />
+                <h2 className="text-lg font-semibold text-gray-900">Run Artifacts <span className="text-gray-500 font-normal text-sm ml-1">({displayArtifacts.length})</span></h2>
+              </div>
+              <button 
+                onClick={() => setIsArtifactsModalOpen(false)} 
+                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-1.5 rounded-md transition-colors"
+              >
+                <IconX size={20} />
+              </button>
+            </div>
+            <div className="p-6 overflow-auto bg-gray-50/30">
+              {displayArtifacts.length === 0 ? (
+                <div className="text-center text-gray-500 py-12 flex flex-col items-center justify-center">
+                  <IconFile size={48} className="text-gray-300 mb-4" />
+                  <p className="text-base font-medium text-gray-900 mb-1">No artifacts found</p>
+                  <p className="text-sm">This run hasn't generated any files or logs yet.</p>
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2">
+                  {displayArtifacts.map((artifact) => (
                     <StepArtifactCard key={artifact.id} runID={id} artifact={artifact} />
                   ))}
                 </div>
-              ) : null}
+              )}
             </div>
           </div>
-        </Card>
-      ) : null}
-
-      <Card>
-        {runQ.data?.error ? <p className="mb-3 rounded bg-rose-50 px-2 py-1 text-xs text-rose-700">{runQ.data.error}</p> : null}
-
-        <div className="flex flex-wrap gap-2">
-          <button onClick={() => interrupt.mutate()} className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"><PauseCircle className="h-3.5 w-3.5" />Interrupt</button>
-          <button onClick={() => resume.mutate()} className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"><Play className="h-3.5 w-3.5" />Resume</button>
-          <button onClick={() => approve.mutate()} className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"><ShieldCheck className="h-3.5 w-3.5" />Approve</button>
-          <button onClick={() => restart.mutate()} disabled={!runQ.data || restart.isPending} className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-50 disabled:opacity-50"><RefreshCw className="h-3.5 w-3.5" />Restart run</button>
-          <button onClick={() => qc.invalidateQueries({ queryKey: ['telemetry', id] })} className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" />Refresh</button>
-          <a href={`/api/runs/${id}/export`} className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium hover:bg-slate-50">Export bundle</a>
         </div>
-        <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_auto]">
-          <input
-            type="text"
-            value={steerText}
-            onChange={(e) => setSteerText(e.target.value)}
-            placeholder="Steer the session with additional operator instructions..."
-            className="h-9 rounded-md border border-slate-300 px-3 text-sm"
-          />
-          <button
-            disabled={!steerText || steer.isPending}
-            onClick={() => steer.mutate()}
-            className="h-9 rounded-md bg-indigo-600 px-3 text-xs font-medium text-white disabled:opacity-50"
-          >
-            Send steer event
-          </button>
-        </div>
-      </Card>
-
-      <Card>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold tracking-tight">Session Timeline</h3>
-        </div>
-        {!timeline ? (
-          <EmptyState title="No timeline data yet" body="Timeline appears as trace spans are emitted." />
-        ) : (
-          <div className="space-y-1.5">
-            <div className="rounded border border-slate-200 bg-slate-50/70 p-2">
-              <div className="space-y-2">
-                {timeline.lanes
-                  .filter((lane) => lane.spans.length > 0)
-                  .sort((a, b) => b.spans.length - a.spans.length)
-                  .map((lane) => (
-                    <div key={lane.id} className="grid grid-cols-[104px_minmax(0,1fr)] items-center gap-2">
-                      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500">{lane.label}</div>
-                      <div className="relative h-6 overflow-hidden rounded border border-slate-200 bg-white">
-                        {lane.spans.map((span) => {
-                          const start = ((span.__start - timeline.min) / timeline.total) * 100
-                          const width = Math.max(0.6, (((span.__end || span.__start) - span.__start) / timeline.total) * 100)
-                          const tone = laneMeta[lane.id].barTone
-                          return (
-                            <button
-                              key={span.id}
-                              className={`absolute top-1 h-4 rounded-[3px] px-1 text-left text-[9px] font-medium text-white ${tone}`}
-                              style={{ left: `${start}%`, width: `${width}%` }}
-                              onClick={() => setSelectedSpan(span)}
-                              title={`${span.name} (${span.status})`}
-                            >
-                              <span className="block truncate leading-4">{span.name}</span>
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </Card>
-
-      <Card>
-        <div className="sticky top-0 z-10 -mx-1 mb-3 flex flex-wrap items-center justify-between gap-2 bg-white px-1 py-1">
-          <div className="inline-flex rounded-md border border-slate-300 bg-white p-1">
-            <TabButton active={activeTab === 'transcript'} onClick={() => setActiveTab('transcript')} icon={<PlayCircle className="h-4 w-4" />} label="Transcript" />
-            <TabButton active={activeTab === 'debug'} onClick={() => setActiveTab('debug')} icon={<Layers className="h-4 w-4" />} label="Debug" />
-            <TabButton active={activeTab === 'events'} onClick={() => setActiveTab('events')} icon={<Clock3 className="h-4 w-4" />} label="All events" />
-          </div>
-          <div className="flex items-center gap-2 rounded-md border border-slate-300 px-2 py-1">
-            <Filter className="h-4 w-4 text-slate-500" />
-            <input value={filterText} onChange={(e) => setFilterText(e.target.value)} placeholder="Filter transcript/events..." className="w-56 border-none bg-transparent text-sm outline-none" />
-          </div>
-        </div>
-
-        {activeTab === 'transcript' ? (
-          <TranscriptTab
-            runID={id}
-            rows={filteredEvents}
-            runStartMs={runStartMs}
-            stepIndexByID={stepIndexByID}
-            stepArtifactsByStepID={stepArtifactsByStepID}
-            replayPending={replay.isPending}
-            onReplayFromStep={(step) => replay.mutate({ resumeFromStep: step })}
-          />
-        ) : null}
-
-        {activeTab === 'debug' ? (
-          <DebugTab
-            telemetry={telemetry}
-            selectedSpan={selectedSpan}
-            onSelectSpan={setSelectedSpan}
-            selectedToolCallID={selectedToolCallID}
-            onSelectToolCall={setSelectedToolCallID}
-            selectedToolCall={selectedToolCall}
-          />
-        ) : null}
-
-        {activeTab === 'events' ? (
-          <EventsTab rows={filteredEvents} />
-        ) : null}
-      </Card>
+      )}
     </div>
   )
 }
 
-function TranscriptTab({
-  runID,
-  rows,
-  runStartMs,
-  stepIndexByID,
-  stepArtifactsByStepID,
-  replayPending,
-  onReplayFromStep,
-}: {
-  runID: string
-  rows: EventRow[]
-  runStartMs: number
-  stepIndexByID: Record<string, number>
-  stepArtifactsByStepID: Record<string, DisplayArtifact[]>
-  replayPending: boolean
-  onReplayFromStep: (step: number) => void
-}) {
-  const [expandedRowID, setExpandedRowID] = useState('')
-  if (rows.length === 0) return <EmptyState title="No transcript events" body="Events appear while the session runs." />
-
-  return (
-    <div className="max-h-[560px] space-y-1 overflow-auto pr-1">
-      {rows.map((row) => {
-        const expanded = expandedRowID === row.id
-        const role = laneMeta[row.actor]
-        const line = transcriptLine(row)
-        const relativeSince = Number.isFinite(runStartMs) ? formatRelativeSince(runStartMs, row.created_at) : ''
-        const rowArtifacts = stepArtifactsByStepID[row.step_id] ?? []
-        const metaItems: ReactNode[] = []
-        if (row.duration_ms) metaItems.push(<span key="duration">{formatDuration(row.duration_ms)}</span>)
-        if (row.usage_label) metaItems.push(<span key="usage">{row.usage_label}</span>)
-        if (relativeSince) metaItems.push(<span key="relative">{relativeSince}</span>)
-        return (
-          <div key={row.id} className="rounded-md border border-slate-200 bg-white">
-            <button
-              className="w-full px-3 py-2 text-left transition hover:border-slate-300 hover:bg-slate-50"
-              onClick={() => setExpandedRowID(expanded ? '' : row.id)}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="mb-0.5 flex items-center gap-1.5">
-                    <span className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${role.tone}`}>{role.label}</span>
-                    <span className="text-[11px] font-medium text-slate-400">#{row.seq}</span>
-                    <span className="truncate text-[12px] font-semibold leading-4 text-slate-800">{line.title}</span>
-                  </div>
-                  <p className="line-clamp-2 break-all text-[12px] leading-4 text-slate-600">{line.subtitle}</p>
-                </div>
-                <div className="shrink-0">
-                  <div className="flex items-center gap-1 text-[11px] text-slate-500">
-                    {metaItems.map((item, idx) => (
-                      <span key={`meta-${idx}`} className="inline-flex items-center gap-1">
-                        {idx > 0 ? <span className="text-slate-400">•</span> : null}
-                        {item}
-                      </span>
-                    ))}
-                    {stepIndexByID[row.step_id] && metaItems.length > 0 ? <span className="text-slate-400">•</span> : null}
-                    {stepIndexByID[row.step_id] ? (
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault()
-                          e.stopPropagation()
-                          onReplayFromStep(stepIndexByID[row.step_id])
-                        }}
-                        disabled={replayPending}
-                        className="inline-flex items-center gap-0.5 rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                        title={`Restart from step ${stepIndexByID[row.step_id]}`}
-                      >
-                        <RotateCcw className="h-2.5 w-2.5" />
-                        Restart here
-                      </button>
-                    ) : null}
-                    <ChevronDown className={`ml-1 h-3.5 w-3.5 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-                  </div>
-                </div>
-              </div>
-            </button>
-            {expanded ? (
-              <div className="space-y-3 border-t border-slate-200 bg-slate-50/60 px-3 py-3">
-                <div className="space-y-1">
-                  <p className="text-xs font-medium text-slate-700">Inspector</p>
-                  <p className="text-[11px] text-slate-500">{humanizeEventType(row.event_type)} • {new Date(row.created_at).toLocaleString()}</p>
-                  <pre className="max-h-64 overflow-auto rounded-md bg-slate-900 p-2 font-mono text-[11px] text-slate-100">{JSON.stringify(row.parsed, null, 2)}</pre>
-                </div>
-                <StepArtifacts runID={runID} artifacts={rowArtifacts} />
-              </div>
-            ) : null}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-function DebugTab({
-  telemetry,
-  selectedSpan,
-  onSelectSpan,
-  selectedToolCallID,
-  onSelectToolCall,
-  selectedToolCall,
-}: {
-  telemetry: RunTelemetry | undefined
-  selectedSpan: TraceSpan | null
-  onSelectSpan: (span: TraceSpan) => void
-  selectedToolCallID: string
-  onSelectToolCall: (id: string) => void
-  selectedToolCall: ToolCall | null
-}) {
-  const spans = telemetry?.spans ?? []
-  const toolCalls = telemetry?.tool_calls ?? []
-
-  if (!telemetry) return <p className="text-sm text-slate-600">Loading debug data...</p>
-
-  return (
-    <>
-      <div className="grid gap-3 xl:grid-cols-[1fr_1fr]">
-      <div className="space-y-2">
-        <h4 className="text-sm font-semibold">Trace Spans</h4>
-        <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
-          {spans.length === 0 ? <EmptyState title="No spans" body="Span records will appear here." /> : spans.map((span) => (
-            <button key={span.id} onClick={() => onSelectSpan(span)} className="w-full rounded border border-slate-200 p-2 text-left hover:border-indigo-200">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-medium">{span.name}</span>
-                <span className="text-slate-500">{span.status}</span>
-              </div>
-              <p className="mt-1 text-[11px] text-slate-500">{span.kind} • {formatSpanDuration(span.started_at, span.ended_at)}</p>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <h4 className="text-sm font-semibold">Tool Calls</h4>
-        <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
-          {toolCalls.length === 0 ? <EmptyState title="No tool calls" body="Tool calls appear during execution." /> : toolCalls.map((tc) => (
-            <button
-              key={tc.id}
-              onClick={() => onSelectToolCall(tc.id)}
-              className={`w-full rounded border p-2 text-left text-xs ${selectedToolCallID === tc.id ? 'border-indigo-300 bg-indigo-50/40' : 'border-slate-200 hover:border-indigo-200'}`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-medium">{tc.tool_name}</span>
-                <StatusBadge status={tc.status} />
-              </div>
-              <p className="mt-1 text-slate-500">{formatSpanDuration(tc.started_at, tc.ended_at)}</p>
-            </button>
-          ))}
-        </div>
-
-        {selectedSpan ? (
-          <div className="rounded border border-indigo-200 bg-indigo-50/40 p-2 text-xs">
-            <p className="font-medium">Selected Span: {selectedSpan.name}</p>
-            <pre className="mt-2 max-h-40 overflow-auto rounded bg-slate-900 p-2 font-mono text-[11px] text-slate-100">{prettyJSON(selectedSpan.attrs_json)}</pre>
-          </div>
-        ) : null}
-      </div>
-      </div>
-      {selectedToolCall ? (
-        <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
-          <div className="mb-2 flex items-center justify-between">
-            <h5 className="text-sm font-semibold">Tool execution detail</h5>
-            <div className="flex items-center gap-2">
-              <button className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px]" onClick={() => navigator.clipboard.writeText(selectedToolCall.input_json || '')}>Copy input</button>
-              <button className="rounded border border-slate-300 bg-white px-2 py-1 text-[11px]" onClick={() => navigator.clipboard.writeText(selectedToolCall.output_json || '')}>Copy output</button>
-            </div>
-          </div>
-          <div className="grid gap-3 xl:grid-cols-2">
-            <div>
-              <p className="mb-1 text-xs font-medium text-slate-600">Request</p>
-              <pre className="max-h-44 overflow-auto rounded bg-slate-900 p-2 font-mono text-[11px] text-slate-100">{prettyMaybeJSON(selectedToolCall.input_json)}</pre>
-            </div>
-            <div>
-              <p className="mb-1 text-xs font-medium text-slate-600">Response</p>
-              <pre className="max-h-44 overflow-auto rounded bg-slate-900 p-2 font-mono text-[11px] text-slate-100">{prettyMaybeJSON(selectedToolCall.output_json)}</pre>
-            </div>
-          </div>
-          {(selectedToolCall.error_message || selectedToolCall.error_class) ? (
-            <div className="mt-2 rounded border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700">
-              [{selectedToolCall.error_class || 'error'}] {selectedToolCall.error_message || 'unknown error'}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </>
-  )
-}
-
-function EventsTab({ rows }: { rows: EventRow[] }) {
-  if (rows.length === 0) return <EmptyState title="No events" body="No events match your current filter." />
-  return (
-    <div className="max-h-[540px] overflow-auto">
-      <table className="w-full table-fixed text-left text-xs">
-        <thead className="sticky top-0 bg-white">
-          <tr className="border-b border-slate-200 text-slate-500">
-            <th className="py-2">Seq</th>
-            <th className="py-2">Type</th>
-            <th className="py-2">Time</th>
-            <th className="py-2">Summary</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.id} className="border-b border-slate-100">
-              <td className="w-12 py-2">{row.seq}</td>
-              <td className="w-44 truncate py-2 font-medium">{row.event_type}</td>
-              <td className="w-24 py-2 text-slate-600">{new Date(row.created_at).toLocaleTimeString()}</td>
-              <td className="truncate py-2 text-slate-700">{summarizeEvent(row)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function StepArtifacts({ runID, artifacts }: { runID: string; artifacts: DisplayArtifact[] }) {
-  if (artifacts.length === 0) return <p className="text-[11px] text-slate-500">No artifacts for this step.</p>
-  return (
-    <div className="space-y-2">
-      <p className="text-xs font-medium text-slate-700">Artifacts ({artifacts.length})</p>
-      {artifacts.map((artifact) => (
-        <StepArtifactCard key={artifact.id} runID={runID} artifact={artifact} />
-      ))}
-    </div>
-  )
-}
-
-function StepArtifactCard({ runID, artifact }: { runID: string; artifact: DisplayArtifact }) {
-  const hasInlineLog = typeof artifact._inline_log === 'string'
-  const isImage = !hasInlineLog && artifact.mime_type.startsWith('image/')
-  const contentURL = !hasInlineLog ? api.getRunArtifactContentURL(runID, artifact.id) : ''
-  return (
-    <div className="rounded border border-slate-200 bg-white p-2 text-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-medium">{artifact.kind}</p>
-        <div className="flex items-center gap-1">
-          {hasInlineLog ? (
-            <button
-              className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-0.5 text-xs"
-              onClick={() => navigator.clipboard.writeText(String(artifact._inline_log || ''))}
-            >
-              <Copy className="h-3 w-3" />
-              Copy log
-            </button>
-          ) : (
-            <>
-              <button className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-0.5 text-xs" onClick={() => navigator.clipboard.writeText(artifact.path)}>
-                <Copy className="h-3 w-3" />
-                Copy path
-              </button>
-              <a href={contentURL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-0.5 text-xs hover:bg-slate-50">
-                <ExternalLink className="h-3 w-3" />
-                Open
-              </a>
-            </>
-          )}
-        </div>
-      </div>
-      <p className="break-all font-mono text-[11px] text-slate-600">{artifact.path}</p>
-      <p className="text-[11px] text-slate-500">{(artifact.size_bytes / 1024).toFixed(1)} KB</p>
-      {hasInlineLog ? (
-        <pre className="mt-2 max-h-36 overflow-auto rounded bg-slate-900 p-2 font-mono text-[11px] text-slate-100">{String(artifact._inline_log)}</pre>
-      ) : null}
-      {isImage ? (
-        <a href={contentURL} target="_blank" rel="noreferrer" className="mt-2 block rounded border border-slate-200 bg-slate-50 p-1">
-          <img src={contentURL} alt={artifact.kind} className="max-h-72 w-full rounded object-contain" loading="lazy" />
-        </a>
-      ) : null}
-    </div>
-  )
-}
-
-function TabButton({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: ReactNode; label: string }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`inline-flex items-center gap-1 rounded px-2.5 py-1 text-xs font-medium transition ${active ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-800'}`}
-    >
-      {icon}
-      {label}
-    </button>
-  )
-}
-
-function MetaChip({ label, value }: { label: string; value: string }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-slate-700">
-      <span className="text-slate-500">{label}</span>
-      <span className="font-medium text-slate-900">{value}</span>
-    </span>
-  )
-}
-
-function FinalResultBody({ value }: { value: string }) {
-  const normalized = value.trim()
-  if (!normalized) return null
-
-  if (shouldRenderFinalResultAsPre(normalized)) {
-    return (
-      <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 p-2 text-sm leading-5 text-slate-800">
-        {prettifyFinalResult(normalized)}
-      </pre>
-    )
+function mapEventToRole(ev: EventRow) {
+  if (ev.event_type === 'run.started') return 'Running'
+  if (ev.actor === 'user') return 'User'
+  if (ev.event_type === 'tool.result') {
+     const parsed = ev.parsed as any
+     if (parsed?.tool === 'bash') return 'Bash'
+     if (parsed?.tool === 'write') return 'Write'
+     if (typeof parsed?.tool === 'string' && parsed.tool) {
+        return parsed.tool
+     }
+     return 'Tool'
   }
-
-  return <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-5 text-slate-800">{normalized}</p>
-}
-
-function shouldRenderFinalResultAsPre(value: string) {
-  if (value.includes('\n')) return true
-  if (value.includes('```')) return true
-  if (/^\s*[{[]/.test(value)) return true
-  if (/^\s{2,}\S/m.test(value)) return true
-  if (/^\s*[-*]\s+/m.test(value)) return true
-  if (/^\s*\d+\.\s+/m.test(value)) return true
-  return isDashSeparatedKeyValueSummary(value)
-}
-
-function prettifyFinalResult(value: string) {
-  if (!isDashSeparatedKeyValueSummary(value)) return value
-  return value
-    .split(/\s-\s+/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .join('\n')
-}
-
-function isDashSeparatedKeyValueSummary(value: string) {
-  if (value.includes('\n')) return false
-  const parts = value.split(/\s-\s+/).map((part) => part.trim()).filter(Boolean)
-  if (parts.length < 3) return false
-  const labeled = parts.filter((part) => /^[A-Za-z0-9_ /().]+:\s+.+$/.test(part))
-  return labeled.length >= 3
+  return 'Agent'
 }
 
 function summarizeEvent(row: EventRow) {
@@ -879,26 +735,19 @@ function extractSnippet(parsed: Record<string, unknown>) {
   return ''
 }
 
-function humanizeEventType(value: string) {
-  if (!value) return 'Event'
-  return value.replace(/[._]/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase())
-}
-
 function truncateText(value: string, max = 180) {
   const compact = value.replace(/\s+/g, ' ').trim()
   if (!compact) return ''
   return compact.length > max ? `${compact.slice(0, max - 1)}…` : compact
 }
 
-function usageLabelFromPayload(payload: Record<string, unknown> | string) {
-  if (typeof payload !== 'object' || payload === null) return ''
-  const usage = payload.usage
-  if (!usage || typeof usage !== 'object') return ''
-  const rec = usage as Record<string, unknown>
-  const inTokens = Number(rec.input_tokens || 0)
-  const outTokens = Number(rec.output_tokens || 0)
-  if (inTokens === 0 && outTokens === 0) return ''
-  return `${inTokens} tok in / ${outTokens} tok out`
+function humanizeEventType(value: string) {
+  if (!value) return 'Event'
+  return value.replace(/[._]/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase())
+}
+
+function toolLabel(name: string) {
+  return name.replace(/\./g, ' ').trim()
 }
 
 function summarizeToolResult(parsed: Record<string, unknown>, tool: string) {
@@ -937,20 +786,60 @@ function compactIPInfo(text: string) {
   return ''
 }
 
-function toolLabel(name: string) {
-  return name.replace(/\./g, ' ').trim()
+function StepArtifacts({ runID, artifacts }: { runID: string; artifacts: DisplayArtifact[] }) {
+  if (artifacts.length === 0) return <p className="text-[11px] text-gray-500">No artifacts for this step.</p>
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-gray-700">Artifacts ({artifacts.length})</p>
+      {artifacts.map((artifact) => (
+        <StepArtifactCard key={artifact.id} runID={runID} artifact={artifact} />
+      ))}
+    </div>
+  )
 }
 
-function detectStopReason(status: string, rows: EventRow[]) {
-  if (status === 'completed') return 'end_turn'
-  if (status === 'cancelled') return 'cancelled'
-  const latest = [...rows].reverse().find((row) => row.event_type === 'run.failed' || row.event_type === 'approval.requested')
-  if (!latest || typeof latest.parsed !== 'object' || latest.parsed === null) return ''
-  const payload = latest.parsed as Record<string, unknown>
-  if (typeof payload.reason === 'string' && payload.reason) return payload.reason
-  if (typeof payload.error === 'string' && payload.error) return payload.error
-  if (latest.event_type === 'approval.requested') return 'approval_required'
-  return ''
+function StepArtifactCard({ runID, artifact }: { runID: string; artifact: DisplayArtifact }) {
+  const hasInlineLog = typeof artifact._inline_log === 'string'
+  const isImage = !hasInlineLog && artifact.mime_type.startsWith('image/')
+  const contentURL = !hasInlineLog ? api.getRunArtifactContentURL(runID, artifact.id) : ''
+  return (
+    <div className="rounded border border-gray-200 bg-white p-2 text-sm shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-medium">{artifact.kind}</p>
+        <div className="flex items-center gap-1">
+          {hasInlineLog ? (
+            <button
+              className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50 transition-colors"
+              onClick={() => navigator.clipboard.writeText(String(artifact._inline_log || ''))}
+            >
+              <IconCopy size={12} />
+              Copy log
+            </button>
+          ) : (
+            <>
+              <button className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50 transition-colors" onClick={() => navigator.clipboard.writeText(artifact.path)}>
+                <IconCopy size={12} />
+                Copy path
+              </button>
+              <a href={contentURL} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50 transition-colors">
+                Open
+              </a>
+            </>
+          )}
+        </div>
+      </div>
+      <p className="break-all font-mono text-[11px] text-gray-600 mt-1">{artifact.path}</p>
+      <p className="text-[11px] text-gray-500">{(artifact.size_bytes / 1024).toFixed(1)} KB</p>
+      {hasInlineLog ? (
+        <pre className="mt-2 max-h-36 overflow-auto rounded bg-gray-900 p-2 font-mono text-[11px] text-gray-100">{String(artifact._inline_log)}</pre>
+      ) : null}
+      {isImage ? (
+        <a href={contentURL} target="_blank" rel="noreferrer" className="mt-2 block rounded border border-gray-200 bg-gray-50 p-1">
+          <img src={contentURL} alt={artifact.kind} className="max-h-72 w-full rounded object-contain" loading="lazy" />
+        </a>
+      ) : null}
+    </div>
+  )
 }
 
 function actorFromEventType(eventType: string): ActorLaneId {
@@ -980,21 +869,14 @@ function tryParseJSON(value: string) {
   }
 }
 
-function prettyJSON(value: string) {
-  try {
-    return JSON.stringify(JSON.parse(value), null, 2)
-  } catch {
-    return value
-  }
-}
-
-function prettyMaybeJSON(value?: string) {
-  if (!value) return '{}'
-  try {
-    return JSON.stringify(JSON.parse(value), null, 2)
-  } catch {
-    return value
-  }
+function usageLabelFromPayload(payload: Record<string, unknown> | string) {
+  if (typeof payload !== 'object' || payload === null) return null
+  const usage = payload.usage as Record<string, unknown>
+  if (!usage) return null
+  const inTokens = Number(usage.input_tokens || 0)
+  const outTokens = Number(usage.output_tokens || 0)
+  if (inTokens === 0 && outTokens === 0) return null
+  return { inTokens, outTokens }
 }
 
 function formatDuration(ms: number) {
@@ -1008,19 +890,4 @@ function formatDuration(ms: number) {
   const h = Math.floor(m / 60)
   const remM = m % 60
   return `${h}h ${remM}m`
-}
-
-function formatSpanDuration(start?: string, end?: string) {
-  const s = parseTimeMs(start)
-  const e = parseTimeMs(end)
-  if (!Number.isFinite(s)) return '-'
-  if (!Number.isFinite(e)) return 'running'
-  return formatDuration(e - s)
-}
-
-function formatRelativeSince(runStartMs: number, eventTime: string) {
-  const eventMs = parseTimeMs(eventTime)
-  if (!Number.isFinite(runStartMs) || !Number.isFinite(eventMs)) return ''
-  const delta = Math.max(0, eventMs - runStartMs)
-  return formatDuration(delta)
 }

@@ -3,3 +3,5 @@ bin/
 *.db-*
 artifacts/
 ui/dist/
+internal/api/ui/dist/
+build/
