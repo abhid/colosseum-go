@@ -1,10 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronDown, Pencil, Sparkles, Trash2 } from 'lucide-react'
+import { IconPencil, IconSparkles, IconTrash } from '@tabler/icons-react'
 import { api } from '../lib/api'
 import { Card, EmptyState, LoadingState, QueryErrorState, SectionTitle } from '../components/Common'
 import { queryKeys } from '../lib/queryKeys'
+import { ProviderModelCombobox } from '../components/ProviderModelCombobox'
+import { ToolSelectorAccordion } from '../components/ToolSelectorAccordion'
+import {
+  parseAgentConfigText,
+  parseStarterPrompts,
+  toSimpleYAML,
+  pickPreferredOpenAIModel,
+  formatProviderModel,
+  parseProviderModelInput,
+} from '../lib/agentConfig'
 
 export function AgentsPage() {
   const qc = useQueryClient()
@@ -299,8 +309,8 @@ export function AgentsPage() {
                 {editId === a.id ? (
                   <div className="space-y-3">
                     <div className="grid gap-2">
-                      <input className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
-                      <input className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={editForm.description} onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))} />
+                      <input className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
+                      <input className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" value={editForm.description} onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))} />
                       <ProviderModelCombobox
                         value={editProviderModelInput}
                         options={providerModelSuggestions}
@@ -314,14 +324,14 @@ export function AgentsPage() {
                       />
                     </div>
                     <div className="relative">
-                      <textarea className="h-24 w-full rounded-md border border-gray-300 bg-white px-3 py-2 pr-28 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" value={editForm.system_prompt} onChange={(e) => setEditForm((f) => ({ ...f, system_prompt: e.target.value }))} />
+                      <textarea className="h-24 w-full rounded-md border border-gray-300 bg-white px-3 py-2 pr-28 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" value={editForm.system_prompt} onChange={(e) => setEditForm((f) => ({ ...f, system_prompt: e.target.value }))} />
                       <button
                         className="absolute bottom-3 right-3 inline-flex h-7 items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 text-xs font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-100 disabled:opacity-50"
                         disabled={!editForm.provider || enhanceEditPrompt.isPending}
                         onClick={() => enhanceEditPrompt.mutate()}
                         type="button"
                       >
-                        <Sparkles className="h-3.5 w-3.5" />
+                        <IconSparkles className="h-3.5 w-3.5" />
                         {enhanceEditPrompt.isPending ? 'Enhancing...' : 'AI Enhance'}
                       </button>
                     </div>
@@ -332,13 +342,13 @@ export function AgentsPage() {
                       onChange={(next) => setEditForm((f) => ({ ...f, allowed_tools: next }))}
                     />
                     <textarea
-                      className="h-20 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                      className="h-20 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
                       placeholder="Starter prompts (one per line)"
                       value={editForm.starter_prompts_text}
                       onChange={(e) => setEditForm((f) => ({ ...f, starter_prompts_text: e.target.value }))}
                     />
                     <textarea
-                      className="h-20 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                      className="h-20 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
                       placeholder="Default session task (used when task is blank)"
                       value={editForm.default_task}
                       onChange={(e) => setEditForm((f) => ({ ...f, default_task: e.target.value }))}
@@ -400,7 +410,7 @@ export function AgentsPage() {
                           aria-label="Edit agent"
                           title="Edit agent"
                         >
-                          <Pencil className="h-3.5 w-3.5" />
+                          <IconPencil className="h-3.5 w-3.5" />
                         </button>
                         <button
                           className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-red-200 text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
@@ -436,7 +446,7 @@ export function AgentsPage() {
                           aria-label="Delete agent"
                           title="Delete agent"
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
+                          <IconTrash className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>
@@ -524,7 +534,7 @@ export function AgentsPage() {
               ) : (
                 <div className="mt-3">
                   <textarea
-                    className="h-20 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                    className="h-20 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
                     placeholder="Describe what this agent should do"
                     value={createDescribeInput}
                     onChange={(e) => setCreateDescribeInput(e.target.value)}
@@ -538,7 +548,7 @@ export function AgentsPage() {
                   disabled={!createDescribeInput.trim() || generateCreateAgent.isPending || providerIDs.length === 0}
                   onClick={() => generateCreateAgent.mutate()}
                 >
-                  <Sparkles className="h-3.5 w-3.5" />
+                  <IconSparkles className="h-3.5 w-3.5" />
                   {createStartingPoint === 'template'
                     ? (generateCreateAgent.isPending ? 'Applying...' : 'Apply notes')
                     : (generateCreateAgent.isPending ? 'Generating...' : 'Generate')}
@@ -548,7 +558,7 @@ export function AgentsPage() {
 
             <div className="mt-4 space-y-3">
               <h4 className="text-sm font-semibold tracking-tight text-gray-900">Core settings</h4>
-              <input className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400" placeholder="Agent name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+              <input className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" placeholder="Agent name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
               <ProviderModelCombobox
                 value={createProviderModelInput}
                 options={providerModelSuggestions}
@@ -589,7 +599,7 @@ export function AgentsPage() {
                 </div>
               </div>
               <textarea
-                className="h-56 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs leading-relaxed text-gray-700 focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                className="h-56 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs leading-relaxed text-gray-700 focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
                 value={createConfigText}
                 onFocus={() => setIsEditingCreateConfig(true)}
                 onBlur={() => {
@@ -654,408 +664,3 @@ export function AgentsPage() {
   )
 }
 
-function ProviderModelCombobox({
-  value,
-  options,
-  placeholder,
-  disabled,
-  onValueChange,
-}: {
-  value: string
-  options: string[]
-  placeholder: string
-  disabled?: boolean
-  onValueChange: (next: string) => void
-}) {
-  const rootRef = useRef<HTMLDivElement | null>(null)
-  const [open, setOpen] = useState(false)
-  const [activeIndex, setActiveIndex] = useState(-1)
-  const normalized = value.trim().toLowerCase()
-  const filtered = useMemo(() => {
-    const base = normalized
-      ? options.filter((option) => option.toLowerCase().includes(normalized))
-      : options
-    return base.slice(0, 25)
-  }, [options, normalized])
-
-  useEffect(() => {
-    if (activeIndex >= filtered.length) setActiveIndex(filtered.length - 1)
-  }, [filtered.length, activeIndex])
-
-  useEffect(() => {
-    if (!open) return
-    const onPointerDown = (event: MouseEvent) => {
-      const node = rootRef.current
-      if (!node) return
-      if (event.target instanceof Node && !node.contains(event.target)) setOpen(false)
-    }
-    window.addEventListener('mousedown', onPointerDown)
-    return () => window.removeEventListener('mousedown', onPointerDown)
-  }, [open])
-
-  return (
-    <div ref={rootRef} className="relative">
-      <input
-        className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 pr-9 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400"
-        placeholder={placeholder}
-        value={value}
-        disabled={disabled}
-        onFocus={() => {
-          if (disabled) return
-          setOpen(true)
-        }}
-        onClick={() => {
-          if (disabled) return
-          setOpen(true)
-        }}
-        onChange={(e) => {
-          onValueChange(e.target.value)
-          setOpen(true)
-          setActiveIndex(-1)
-        }}
-        onKeyDown={(e) => {
-          if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
-            setOpen(true)
-            return
-          }
-          if (!open || filtered.length === 0) return
-          if (e.key === 'ArrowDown') {
-            e.preventDefault()
-            setActiveIndex((idx) => Math.min(idx + 1, filtered.length - 1))
-            return
-          }
-          if (e.key === 'ArrowUp') {
-            e.preventDefault()
-            setActiveIndex((idx) => Math.max(idx - 1, 0))
-            return
-          }
-          if (e.key === 'Enter' && activeIndex >= 0 && activeIndex < filtered.length) {
-            e.preventDefault()
-            onValueChange(filtered[activeIndex])
-            setOpen(false)
-            return
-          }
-          if (e.key === 'Escape') {
-            setOpen(false)
-          }
-        }}
-      />
-      <button
-        type="button"
-        className="absolute inset-y-0 right-0 inline-flex w-9 items-center justify-center text-gray-400 transition-colors hover:text-gray-600 disabled:cursor-not-allowed disabled:text-gray-300"
-        disabled={disabled}
-        onClick={() => setOpen((v) => !v)}
-        aria-label="Toggle model suggestions"
-      >
-        <ChevronDown className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-      {open ? (
-        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-gray-200 bg-white p-1 shadow-lg">
-          {filtered.length === 0 ? (
-            <p className="px-2 py-1.5 text-xs text-gray-500">No matching models</p>
-          ) : (
-            filtered.map((option, idx) => (
-              <button
-                key={option}
-                type="button"
-                className={`block w-full rounded px-2 py-1.5 text-left text-sm transition-colors ${idx === activeIndex ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-50'}`}
-                onMouseEnter={() => setActiveIndex(idx)}
-                onMouseDown={(e) => {
-                  e.preventDefault()
-                  onValueChange(option)
-                  setOpen(false)
-                }}
-              >
-                {option}
-              </button>
-            ))
-          )}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-function ToolSelectorAccordion({
-  title,
-  tools,
-  selected,
-  onChange,
-}: {
-  title: string
-  tools: Array<{ name: string; description: string; isBuiltin: boolean }>
-  selected: string[]
-  onChange: (next: string[]) => void
-}) {
-  const [filter, setFilter] = useState('')
-  const needle = filter.trim().toLowerCase()
-  const filtered = useMemo(() => {
-    if (!needle) return tools
-    return tools.filter((t) => `${t.name} ${t.description}`.toLowerCase().includes(needle))
-  }, [tools, needle])
-  const grouped = useMemo(() => {
-    const groups: Record<string, Array<{ name: string; description: string; isBuiltin: boolean }>> = {}
-    for (const tool of filtered) {
-      const key = tool.name.includes('.') ? tool.name.split('.')[0] : 'other'
-      if (!groups[key]) groups[key] = []
-      groups[key].push(tool)
-    }
-    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b))
-  }, [filtered])
-
-  return (
-    <details className="mt-3 rounded-md border border-gray-200 bg-gray-50/50 p-2">
-      <summary className="cursor-pointer select-none text-sm font-medium text-gray-700 hover:text-gray-900 transition-colors">
-        {title} ({selected.length} selected)
-      </summary>
-      <div className="mt-3 space-y-2">
-        <input
-          className="h-8 w-full rounded-md border border-gray-300 bg-white px-2.5 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
-          placeholder="Filter tools..."
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
-        <div className="max-h-52 space-y-2 overflow-auto rounded-md border border-gray-200 bg-white p-2 shadow-sm">
-          {grouped.length === 0 ? <p className="text-xs text-gray-500">No tools match filter.</p> : null}
-          {grouped.map(([group, items]) => (
-            <div key={group} className="space-y-1">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 pl-1">{group}</p>
-              {items.map((tool) => {
-                const checked = selected.includes(tool.name)
-                return (
-                  <label key={tool.name} className="flex cursor-pointer items-start gap-2 rounded px-1 py-1.5 hover:bg-gray-50 transition-colors">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
-                      checked={checked}
-                      onChange={(e) => {
-                        if (e.target.checked) onChange([...selected, tool.name])
-                        else onChange(selected.filter((v) => v !== tool.name))
-                      }}
-                    />
-                    <span className="min-w-0 text-xs">
-                      <span className="font-mono text-gray-700">{tool.name}</span>
-                      <span className="ml-1 text-gray-500">{tool.description}</span>
-                    </span>
-                  </label>
-                )
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
-    </details>
-  )
-}
-
-function pickPreferredOpenAIModel(models: string[], current: string) {
-  const trimmedCurrent = current.trim()
-  if (trimmedCurrent && models.includes(trimmedCurrent)) return trimmedCurrent
-  const preferredOrder = ['gpt-5.4', 'gpt-4.1-mini', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4o']
-  for (const candidate of preferredOrder) {
-    if (models.includes(candidate)) return candidate
-  }
-  return models[0] || trimmedCurrent || 'gpt-5.4'
-}
-
-function providerDisplayName(provider: string) {
-  const normalized = provider.trim().toLowerCase()
-  if (normalized === 'openai') return 'OpenAI'
-  if (normalized === 'anthropic') return 'Anthropic'
-  if (!normalized) return ''
-  return normalized[0].toUpperCase() + normalized.slice(1)
-}
-
-function formatProviderModel(provider: string, model: string) {
-  const p = provider.trim()
-  const m = model.trim()
-  if (!p && !m) return ''
-  const label = providerDisplayName(p || 'openai')
-  if (!m) return `${label}/`
-  return `${label}/${m}`
-}
-
-function parseProviderModelInput(value: string, providerIDs: string[], fallbackProvider: string) {
-  const raw = value.trim()
-  const fallback = fallbackProvider || providerIDs[0] || ''
-  if (!raw) return { provider: fallback, model: '' }
-  const slash = raw.indexOf('/')
-  if (slash < 0) {
-    return { provider: fallback, model: raw }
-  }
-  const providerPart = raw.slice(0, slash).trim().toLowerCase()
-  const modelPart = raw.slice(slash + 1).trim()
-  const matchedProvider =
-    providerIDs.find((p) => p.toLowerCase() === providerPart) ||
-    providerIDs.find((p) => providerDisplayName(p).toLowerCase() === providerPart) ||
-    fallback
-  return { provider: matchedProvider, model: modelPart }
-}
-
-function parseStarterPrompts(value: string) {
-  return Array.from(
-    new Set(
-      value
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean),
-    ),
-  )
-}
-
-type AgentConfigPatch = {
-  name?: string
-  description?: string
-  provider?: string
-  model?: string
-  system_prompt?: string
-  starter_prompts_text?: string
-  default_task?: string
-  allowed_tools?: string[]
-}
-
-function parseAgentConfigText(text: string, format: 'yaml' | 'json'): { ok: true; patch: AgentConfigPatch } | { ok: false; error: string } {
-  const raw = text.trim()
-  if (!raw) return { ok: false, error: 'Agent config cannot be empty.' }
-  const data = format === 'json' ? parseAgentConfigJSON(raw) : parseAgentConfigYAML(raw)
-  if (data.ok === false) return { ok: false, error: data.error }
-  const out: AgentConfigPatch = {}
-  const value = data.value
-  if (typeof value.name === 'string') out.name = value.name
-  if (typeof value.description === 'string') out.description = value.description
-  if (typeof value.system === 'string') out.system_prompt = value.system
-  if (typeof value.default_task === 'string') out.default_task = value.default_task
-  if (Array.isArray(value.starter_prompts)) out.starter_prompts_text = value.starter_prompts.map((v) => String(v)).join('\n')
-  if (Array.isArray(value.tools)) {
-    out.allowed_tools = value.tools
-      .map((tool) => (tool && typeof tool === 'object' ? String((tool as Record<string, unknown>).type ?? '').trim() : ''))
-      .filter(Boolean)
-  }
-  if (typeof value.model === 'string') {
-    const parsedModel = parseModelFromConfig(value.model)
-    out.provider = parsedModel.provider
-    out.model = parsedModel.model
-  }
-  return { ok: true, patch: out }
-}
-
-function parseAgentConfigJSON(raw: string): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
-  try {
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') return { ok: false, error: 'Agent config JSON must be an object.' }
-    return { ok: true, value: parsed as Record<string, unknown> }
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? `Invalid JSON: ${err.message}` : 'Invalid JSON.' }
-  }
-}
-
-function parseAgentConfigYAML(raw: string): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
-  try {
-    const lines = raw.split('\n')
-    const out: Record<string, unknown> = {}
-    let i = 0
-    for (; i < lines.length; i++) {
-      const line = lines[i]
-      if (!line.trim() || line.trimStart().startsWith('#')) continue
-      if (line.startsWith('  ')) continue
-      const match = line.match(/^([A-Za-z0-9_]+):\s*(.*)$/)
-      if (!match) return { ok: false, error: `Invalid YAML near line ${i + 1}.` }
-      const key = match[1]
-      const inline = match[2]
-      if (inline) {
-        out[key] = parseYAMLScalar(inline)
-        continue
-      }
-      const list: unknown[] = []
-      let j = i + 1
-      for (; j < lines.length; j++) {
-        const child = lines[j]
-        if (!child.trim()) continue
-        if (!child.startsWith('  - ')) break
-        const itemRaw = child.slice(4).trim()
-        if (itemRaw.includes(':')) {
-          const kv = itemRaw.match(/^([A-Za-z0-9_]+):\s*(.*)$/)
-          if (!kv) return { ok: false, error: `Invalid list item near line ${j + 1}.` }
-          list.push({ [kv[1]]: parseYAMLScalar(kv[2]) })
-        } else {
-          list.push(parseYAMLScalar(itemRaw))
-        }
-      }
-      out[key] = list
-      i = j - 1
-    }
-    return { ok: true, value: out }
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Invalid YAML.' }
-  }
-}
-
-function parseYAMLScalar(raw: string): string {
-  const trimmed = raw.trim()
-  if (trimmed === "''" || trimmed === '""') return ''
-  if ((trimmed.startsWith("'") && trimmed.endsWith("'")) || (trimmed.startsWith('"') && trimmed.endsWith('"'))) {
-    return trimmed.slice(1, -1).replace(/''/g, "'")
-  }
-  return trimmed
-}
-
-function parseModelFromConfig(raw: string) {
-  const normalized = raw.trim()
-  if (!normalized) return { provider: 'openai', model: '' }
-  const slash = normalized.indexOf('/')
-  if (slash < 0) return { provider: 'openai', model: normalized }
-  const providerPart = normalized.slice(0, slash).trim().toLowerCase()
-  const modelPart = normalized.slice(slash + 1).trim()
-  if (!providerPart) return { provider: 'openai', model: modelPart }
-  if (providerPart === 'openai' || providerPart === 'anthropic') return { provider: providerPart, model: modelPart }
-  return { provider: providerPart, model: modelPart }
-}
-
-function toSimpleYAML(value: unknown, indent = 0): string {
-  const pad = '  '.repeat(indent)
-  if (Array.isArray(value)) {
-    if (value.length === 0) return '[]'
-    return value
-      .map((item) => {
-        if (item && typeof item === 'object' && !Array.isArray(item)) {
-          const entries = Object.entries(item as Record<string, unknown>)
-          if (entries.length === 0) return `${pad}- {}`
-          const [firstKey, firstVal] = entries[0]
-          const firstLine = `${pad}- ${firstKey}: ${toSimpleYAMLScalar(firstVal)}`
-          const restLines = entries
-            .slice(1)
-            .map(([k, v]) => `${'  '.repeat(indent + 1)}${k}: ${toSimpleYAMLScalar(v)}`)
-            .join('\n')
-          return restLines ? `${firstLine}\n${restLines}` : firstLine
-        }
-        return `${pad}- ${toSimpleYAMLScalar(item)}`
-      })
-      .join('\n')
-  }
-  if (value && typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>)
-    if (entries.length === 0) return '{}'
-    return entries
-      .map(([key, val]) => {
-        if (Array.isArray(val)) {
-          if (val.length === 0) return `${pad}${key}: []`
-          return `${pad}${key}:\n${toSimpleYAML(val, indent + 1)}`
-        }
-        if (val && typeof val === 'object') {
-          return `${pad}${key}:\n${toSimpleYAML(val, indent + 1)}`
-        }
-        return `${pad}${key}: ${toSimpleYAMLScalar(val)}`
-      })
-      .join('\n')
-  }
-  return `${pad}${toSimpleYAMLScalar(value)}`
-}
-
-function toSimpleYAMLScalar(value: unknown): string {
-  if (value === null || value === undefined) return "''"
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-  const raw = String(value)
-  if (!raw) return "''"
-  if (/^[A-Za-z0-9._:/-]+$/.test(raw)) return raw
-  return `'${raw.replace(/'/g, "''")}'`
-}

@@ -2,7 +2,7 @@ import type { PropsWithChildren } from 'react'
 import type { UseQueryResult } from '@tanstack/react-query'
 
 export function Card({ children }: PropsWithChildren) {
-  return <div className="min-w-0 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">{children}</div>
+  return <div className="min-w-0 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">{children}</div>
 }
 
 export function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
@@ -30,7 +30,7 @@ export function StatusBadge({ status }: { status: string }) {
 
 export function EmptyState({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50/50 p-8 text-center">
+    <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-8 text-center">
       <h3 className="text-sm font-medium text-gray-900">{title}</h3>
       <p className="mt-1 text-sm text-gray-500">{body}</p>
     </div>

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Sparkles, Trash2 } from 'lucide-react'
+import { IconSparkles, IconTrash } from '@tabler/icons-react'
 import { EmptyState, SectionTitle } from '../components/Common'
 import { api } from '../lib/api'
 import { queryKeys } from '../lib/queryKeys'
@@ -333,7 +333,7 @@ export function AgentDetailPage() {
                   onClick={() => enhancePrompt.mutate()}
                   type="button"
                 >
-                  <Sparkles className="h-3.5 w-3.5" />
+                  <IconSparkles className="h-3.5 w-3.5" />
                   {enhancePrompt.isPending ? 'Enhancing...' : 'AI Enhance'}
                 </button>
               </div>
@@ -437,7 +437,7 @@ export function AgentDetailPage() {
                 }
               }}
             >
-              <Trash2 className="mr-1 inline-block h-3.5 w-3.5" />
+              <IconTrash className="mr-1 inline-block h-3.5 w-3.5" />
               Delete
             </button>
             <button

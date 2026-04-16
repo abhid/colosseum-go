@@ -339,7 +339,7 @@ export function RunDetailPage() {
               value={steerText}
               onChange={(e) => setSteerText(e.target.value)}
               placeholder="Message agent..." 
-              className="h-9 min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 text-sm shadow-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 lg:w-80 lg:flex-none"
+              className="h-9 min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 text-sm shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 lg:w-80 lg:flex-none"
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()

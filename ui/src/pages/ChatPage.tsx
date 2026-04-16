@@ -2,16 +2,20 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { IconExternalLink } from '@tabler/icons-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { LoadingState, QueryErrorState } from '../components/Common'
 import { api } from '../lib/api'
 import { queryKeys } from '../lib/queryKeys'
-import type { Artifact, ChatMessage } from '../lib/types'
-
-type UiMessage = ChatMessage & { role: 'user' | 'assistant' | 'system' | 'thinking' }
-type ArtifactReference = { runID: string; artifact: Artifact }
-type ImageGalleryItem = { key: string; runID: string; artifact: Artifact; url: string }
+import type { Artifact } from '../lib/types'
+import { ArtifactPreview, MarkdownBubble } from '../components/ChatComponents'
+import { 
+  type UiMessage, 
+  type ImageGalleryItem, 
+  collapseAssistantThinking,
+  isThinkingStatus,
+  isApprovalMessage,
+  resolveReferencedArtifacts,
+  extractArtifactLinkRefs
+} from '../lib/chatUtils'
 
 export function ChatPage() {
   const qc = useQueryClient()
@@ -452,7 +456,7 @@ export function ChatPage() {
                     <div>
                       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">Resume a chat session</p>
                       <input
-                        className="h-8 w-full rounded-md border border-gray-300 bg-white px-2.5 text-xs focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                        className="h-8 w-full rounded-md border border-gray-300 bg-white px-2.5 text-xs focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
                         placeholder="Search chat sessions..."
                         value={sessionSearch}
                         onChange={(event) => setSessionSearch(event.target.value)}
@@ -583,7 +587,7 @@ export function ChatPage() {
               <div className="mb-2 flex items-center gap-2">
                 {!activeSession ? (
                   <select
-                    className="h-8 w-72 max-w-[35%] rounded-md border border-gray-300 bg-white px-2 text-xs focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                    className="h-8 w-72 max-w-[35%] rounded-md border border-gray-300 bg-white px-2 text-xs focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
                     value={agentID}
                     onChange={(event) => setAgentID(event.target.value)}
                   >
@@ -619,7 +623,7 @@ export function ChatPage() {
                   ) : null}
                 <textarea
                   ref={composerRef}
-                  className={`min-h-[72px] w-full rounded-md border bg-white px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 ${
+                  className={`min-h-[72px] w-full rounded-md border bg-white px-3 py-2 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 ${
                     isFileDragActive ? 'border-blue-400 ring-1 ring-blue-300' : 'border-gray-300'
                   }`}
                   placeholder={activeSession ? 'Message the agent...' : 'Start this chat session'}
@@ -718,171 +722,3 @@ export function ChatPage() {
   )
 }
 
-function collapseAssistantThinking(messages: UiMessage[]): UiMessage[] {
-  const out: UiMessage[] = []
-  let idx = 0
-  while (idx < messages.length) {
-    const current = messages[idx]
-    if (current.role !== 'assistant') {
-      out.push(current)
-      idx += 1
-      continue
-    }
-    const runID = current.run_id
-    const block: UiMessage[] = []
-    while (idx < messages.length && messages[idx].role === 'assistant' && messages[idx].run_id === runID) {
-      block.push(messages[idx])
-      idx += 1
-    }
-    if (block.length === 1) {
-      out.push(block[0])
-      continue
-    }
-    const finalMessage = block[block.length - 1]
-    const detail = block.slice(0, -1).map((msg) => `- ${truncate(msg.content, 120)}`).join('\n')
-    out.push({
-      ...finalMessage,
-      id: `${finalMessage.id}:thinking`,
-      role: 'thinking',
-      content: detail || 'Reviewed prior reasoning steps before final output.',
-    })
-    out.push(finalMessage)
-  }
-  return out
-}
-
-function truncate(value: string, max: number): string {
-  if (value.length <= max) return value
-  return `${value.slice(0, max - 1)}...`
-}
-
-function isThinkingStatus(status: string): boolean {
-  const normalized = status.trim().toLowerCase()
-  return normalized === 'queued' || normalized === 'running'
-}
-
-function isApprovalMessage(msg: UiMessage): boolean {
-  const src = String(msg.source || '').trim().toLowerCase()
-  if (src === 'approval.requested') return true
-  const content = String(msg.content || '').toLowerCase()
-  return content.includes('approval') && content.includes('requested')
-}
-
-
-function resolveReferencedArtifacts(
-  text: string,
-  fallbackRunID: string | undefined,
-  artifactsByRunID: Map<string, Artifact[]>,
-): ArtifactReference[] {
-  if (!text) return []
-  const out: ArtifactReference[] = []
-  const seen = new Set<string>()
-  const add = (runID: string, artifact: Artifact) => {
-    const key = `${runID}:${artifact.id}`
-    if (seen.has(key)) return
-    seen.add(key)
-    out.push({ runID, artifact })
-  }
-  if (fallbackRunID) {
-    const artifacts = artifactsByRunID.get(fallbackRunID) ?? []
-    if (artifacts.length > 0) {
-      const ids = new Set(
-        (text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi) ?? []).map((id) =>
-          id.toLowerCase(),
-        ),
-      )
-      for (const artifact of artifacts) {
-        if (ids.has(artifact.id.toLowerCase())) add(fallbackRunID, artifact)
-      }
-    }
-  }
-  for (const ref of extractArtifactLinkRefs(text)) {
-    const artifacts = artifactsByRunID.get(ref.runID) ?? []
-    const match = artifacts.find((artifact) => artifact.id.toLowerCase() === ref.artifactID.toLowerCase())
-    if (match) add(ref.runID, match)
-  }
-  return out
-}
-
-function extractArtifactLinkRefs(text: string): Array<{ runID: string; artifactID: string }> {
-  if (!text) return []
-  const out: Array<{ runID: string; artifactID: string }> = []
-  const seen = new Set<string>()
-  const pattern = /(?:https?:\/\/[^\s)]+)?\/api\/runs\/([^/\s)]+)\/artifacts\/([^/\s)]+)\/content/gi
-  for (const match of text.matchAll(pattern)) {
-    const runID = (match[1] ?? '').trim()
-    const artifactID = (match[2] ?? '').trim()
-    if (!runID || !artifactID) continue
-    const key = `${runID}:${artifactID}`
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push({ runID, artifactID })
-  }
-  return out
-}
-
-function ArtifactPreview({
-  runID,
-  artifact,
-  onImageOpen,
-}: {
-  runID: string
-  artifact: Artifact
-  onImageOpen?: (runID: string, artifactID: string) => void
-}) {
-  const url = api.getRunArtifactContentURL(runID, artifact.id)
-  if (artifact.mime_type.startsWith('image/')) {
-    return (
-      <div className="space-y-1">
-        <p className="text-[11px] text-gray-500">Image artifact</p>
-        <button type="button" className="block" onClick={() => onImageOpen?.(runID, artifact.id)}>
-          <img src={url} alt={artifact.path || artifact.id} className="max-h-72 rounded-md border border-gray-200 object-contain" />
-        </button>
-      </div>
-    )
-  }
-  if (artifact.mime_type.startsWith('video/')) {
-    return (
-      <div className="space-y-1">
-        <p className="text-[11px] text-gray-500">Video artifact</p>
-        <video controls src={url} className="max-h-72 w-full rounded-md border border-gray-200" />
-      </div>
-    )
-  }
-  if (artifact.mime_type.startsWith('audio/')) {
-    return (
-      <div className="space-y-1">
-        <p className="text-[11px] text-gray-500">Audio artifact</p>
-        <audio controls src={url} className="w-full" />
-      </div>
-    )
-  }
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noreferrer"
-      className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
-    >
-      Open artifact: {artifact.path || artifact.id}
-    </a>
-  )
-}
-
-function MarkdownBubble({ text }: { text: string }) {
-  return (
-    <div className="prose prose-sm max-w-none whitespace-normal text-inherit">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          p: ({ children }) => <p className="my-1 whitespace-pre-wrap break-words">{children}</p>,
-          code: ({ children }) => <code className="rounded bg-black/5 px-1 py-0.5 text-[12px]">{children}</code>,
-          a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-2">{children}</a>,
-          img: ({ src, alt }) => <img src={src || ''} alt={alt || 'image'} className="my-2 max-h-80 rounded-md border border-gray-200 object-contain" />,
-        }}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
-  )
-}

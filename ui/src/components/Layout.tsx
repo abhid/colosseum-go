@@ -32,7 +32,7 @@ export function Layout({ children }: PropsWithChildren) {
                   key={item.to}
                   to={item.to}
                   className={({ isActive }) =>
-                    `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors ${isActive ? 'bg-gray-200 text-gray-900' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'}`
+                    `flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-all ${isActive ? 'bg-white shadow-sm border border-gray-200 text-gray-900' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 border border-transparent'}`
                   }
                 >
                   <Icon className="h-4 w-4" />
