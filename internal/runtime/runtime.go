@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/adevireddy/colosseum/internal/policy"
 	"github.com/adevireddy/colosseum/internal/providers"
+	"github.com/adevireddy/colosseum/internal/secrets"
 	"github.com/adevireddy/colosseum/internal/tools"
 	"github.com/google/uuid"
 )
@@ -27,13 +27,31 @@ type SessionStore interface {
 type DBSessionStore struct{ DB *sql.DB }
 
 func (s *DBSessionStore) AppendEvent(ctx context.Context, runID, stepID, eventType string, payload map[string]any) error {
-	seq, err := s.GetCheckpoint(ctx, runID)
-	if err != nil {
-		return err
-	}
 	body, _ := json.Marshal(payload)
-	_, err = s.DB.ExecContext(ctx, `INSERT INTO events(id,run_id,step_id,event_type,seq,payload_json,created_at) VALUES(?,?,?,?,?,?,?)`, uuid.NewString(), runID, stepID, eventType, seq+1, string(body), time.Now().UTC().Format(time.RFC3339Nano))
-	return err
+	const maxAttempts = 3
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		tx, err := s.DB.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		var seq int
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0)+1 FROM events WHERE run_id=?`, runID).Scan(&seq); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO events(id,run_id,step_id,event_type,seq,payload_json,created_at) VALUES(?,?,?,?,?,?,?)`, uuid.NewString(), runID, stepID, eventType, seq, string(body), time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+			_ = tx.Rollback()
+			if isEventSequenceConflict(err) {
+				continue
+			}
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		return nil
+	}
+	return fmt.Errorf("append event retries exceeded")
 }
 
 func (s *DBSessionStore) GetEvents(ctx context.Context, runID string, afterSeq, limit int) ([]map[string]any, error) {
@@ -70,11 +88,12 @@ type Manager struct {
 	Store     SessionStore
 	Providers map[string]providers.Client
 	Tools     *tools.Executor
+	SecretKey string
 	wg        sync.WaitGroup
 }
 
-func NewManager(db *sql.DB, providerMap map[string]providers.Client, toolExec *tools.Executor) *Manager {
-	return &Manager{DB: db, Store: &DBSessionStore{DB: db}, Providers: providerMap, Tools: toolExec}
+func NewManager(db *sql.DB, providerMap map[string]providers.Client, toolExec *tools.Executor, secretKey string) *Manager {
+	return &Manager{DB: db, Store: &DBSessionStore{DB: db}, Providers: providerMap, Tools: toolExec, SecretKey: secretKey}
 }
 
 func (m *Manager) Start(ctx context.Context) {
@@ -132,8 +151,17 @@ func (m *Manager) processOne(ctx context.Context) {
 		log.Printf("runtime query queued run failed: %v", err)
 		return
 	}
-	if _, err := m.DB.ExecContext(ctx, `UPDATE runs SET status='running', started_at=?, updated_at=? WHERE id=? AND status='queued'`, now(), now(), runID); err != nil {
+	res, err := m.DB.ExecContext(ctx, `UPDATE runs SET status='running', started_at=?, updated_at=? WHERE id=? AND status='queued'`, now(), now(), runID)
+	if err != nil {
 		log.Printf("runtime claim run failed: %v", err)
+		return
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		log.Printf("runtime claim run rows affected failed run_id=%s err=%v", runID, err)
+		return
+	}
+	if rowsAffected == 0 {
 		return
 	}
 	m.wg.Add(1)
@@ -226,25 +254,25 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 		if _, err := m.DB.ExecContext(ctx, `INSERT INTO run_steps(id,run_id,idx,step_type,status,input_json,created_at,started_at) VALUES(?,?,?,?,?,?,?,?)`, stepID, runID, stepIdx, "model", "running", `{"message_count":`+fmt.Sprintf("%d", len(messages))+`}`, now(), now()); err != nil {
 			return m.failRun(ctx, runID, err)
 		}
-		_, _ = m.DB.ExecContext(ctx, `INSERT INTO trace_spans(id,run_id,parent_id,name,kind,status,started_at,attrs_json) VALUES(?,?,?,?,?,?,?,?)`, modelSpanID, runID, "", "model.step", "model", "running", now(), `{"step_id":"`+stepID+`"}`)
+		m.execDB(ctx, "insert model trace span", `INSERT INTO trace_spans(id,run_id,parent_id,name,kind,status,started_at,attrs_json) VALUES(?,?,?,?,?,?,?,?)`, modelSpanID, runID, "", "model.step", "model", "running", now(), `{"step_id":"`+stepID+`"}`)
 
 		resp, err := m.completeWithRetry(ctx, provider, providers.CompletionRequest{Model: model, System: systemPrompt, Messages: messages, Tools: providerTools, Timeout: 120 * time.Second})
 		if err != nil {
-			_, _ = m.DB.ExecContext(ctx, `UPDATE run_steps SET status='failed', error=?, ended_at=? WHERE id=?`, err.Error(), now(), stepID)
-			_, _ = m.DB.ExecContext(ctx, `UPDATE trace_spans SET status='failed', ended_at=?, attrs_json=? WHERE id=?`, now(), `{"error":`+strconv.Quote(err.Error())+`}`, modelSpanID)
+			m.execDB(ctx, "mark run step failed", `UPDATE run_steps SET status='failed', error=?, ended_at=? WHERE id=?`, err.Error(), now(), stepID)
+			m.execDB(ctx, "mark model span failed", `UPDATE trace_spans SET status='failed', ended_at=?, attrs_json=? WHERE id=?`, now(), `{"error":`+strconv.Quote(err.Error())+`}`, modelSpanID)
 			return m.failRun(ctx, runID, err)
 		}
 
 		outJSON, _ := json.Marshal(map[string]any{"text": resp.Text, "tool_calls": resp.ToolCalls, "usage": resp.Usage})
-		_, _ = m.DB.ExecContext(ctx, `UPDATE run_steps SET status='completed', output_json=?, ended_at=? WHERE id=?`, string(outJSON), now(), stepID)
-		_, _ = m.DB.ExecContext(ctx, `UPDATE trace_spans SET status='completed', ended_at=? WHERE id=?`, now(), modelSpanID)
+		m.execDB(ctx, "mark run step completed", `UPDATE run_steps SET status='completed', output_json=?, ended_at=? WHERE id=?`, string(outJSON), now(), stepID)
+		m.execDB(ctx, "mark model span completed", `UPDATE trace_spans SET status='completed', ended_at=? WHERE id=?`, now(), modelSpanID)
 		_ = m.Store.AppendEvent(ctx, runID, stepID, "model.response", map[string]any{"text": resp.Text, "tool_calls": resp.ToolCalls, "usage": resp.Usage})
 
 		if len(resp.ToolCalls) == 0 {
 			if strings.TrimSpace(resp.Text) == "" {
 				continue
 			}
-			_, _ = m.DB.ExecContext(ctx, `UPDATE runs SET status='completed', completed_at=?, updated_at=? WHERE id=?`, now(), now(), runID)
+			m.execDB(ctx, "mark run completed", `UPDATE runs SET status='completed', completed_at=?, updated_at=? WHERE id=?`, now(), now(), runID)
 			_ = m.Store.AppendEvent(ctx, runID, stepID, "run.completed", map[string]any{"result": resp.Text})
 			return nil
 		}
@@ -259,14 +287,14 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 			}
 			if decision.RequireApproval {
 				approvalID := uuid.NewString()
-				_, _ = m.DB.ExecContext(ctx, `INSERT INTO approvals(id,run_id,step_id,reason,status,requested_at) VALUES(?,?,?,?,?,?)`, approvalID, runID, stepID, decision.Reason, "pending", now())
-				_, _ = m.DB.ExecContext(ctx, `UPDATE runs SET status='interrupted', updated_at=? WHERE id=?`, now(), runID)
+				m.execDB(ctx, "insert approval", `INSERT INTO approvals(id,run_id,step_id,reason,status,requested_at) VALUES(?,?,?,?,?,?)`, approvalID, runID, stepID, decision.Reason, "pending", now())
+				m.execDB(ctx, "mark run interrupted for approval", `UPDATE runs SET status='interrupted', updated_at=? WHERE id=?`, now(), runID)
 				_ = m.Store.AppendEvent(ctx, runID, stepID, "approval.requested", map[string]any{"approval_id": approvalID, "reason": decision.Reason, "tool": tc.Name})
 				return nil
 			}
-			_, _ = m.DB.ExecContext(ctx, `INSERT INTO tool_calls(id,run_id,step_id,tool_name,input_json,status,started_at) VALUES(?,?,?,?,?,?,?)`, toolCallID, runID, stepID, tc.Name, string(tc.Arguments), "running", now())
+			m.execDB(ctx, "insert tool call", `INSERT INTO tool_calls(id,run_id,step_id,tool_name,input_json,status,started_at) VALUES(?,?,?,?,?,?,?)`, toolCallID, runID, stepID, tc.Name, string(tc.Arguments), "running", now())
 			toolSpanID := uuid.NewString()
-			_, _ = m.DB.ExecContext(ctx, `INSERT INTO trace_spans(id,run_id,parent_id,name,kind,status,started_at,attrs_json) VALUES(?,?,?,?,?,?,?,?)`, toolSpanID, runID, modelSpanID, "tool."+tc.Name, "tool", "running", now(), `{"step_id":"`+stepID+`","tool_call_id":"`+toolCallID+`"}`)
+			m.execDB(ctx, "insert tool trace span", `INSERT INTO trace_spans(id,run_id,parent_id,name,kind,status,started_at,attrs_json) VALUES(?,?,?,?,?,?,?,?)`, toolSpanID, runID, modelSpanID, "tool."+tc.Name, "tool", "running", now(), `{"step_id":"`+stepID+`","tool_call_id":"`+toolCallID+`"}`)
 			result, execErr := m.Tools.Execute(ctx, tools.Context{
 				RunID: runID, StepID: stepID, Workspace: workspace,
 				EnvironmentID: resources.EnvironmentID, CredentialVaultID: resources.VaultID,
@@ -281,8 +309,8 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 				errClass = "tool_error"
 				errMsg = execErr.Error()
 			}
-			_, _ = m.DB.ExecContext(ctx, `UPDATE tool_calls SET output_json=?, status=?, ended_at=?, error_class=?, error_message=?, logs_path=? WHERE id=?`, string(outputJSON), status, now(), errClass, errMsg, "", toolCallID)
-			_, _ = m.DB.ExecContext(ctx, `UPDATE trace_spans SET status=?, ended_at=?, attrs_json=? WHERE id=?`, status, now(), `{"error":`+strconv.Quote(errMsg)+`}`, toolSpanID)
+			m.execDB(ctx, "update tool call result", `UPDATE tool_calls SET output_json=?, status=?, ended_at=?, error_class=?, error_message=?, logs_path=? WHERE id=?`, string(outputJSON), status, now(), errClass, errMsg, "", toolCallID)
+			m.execDB(ctx, "update tool trace span", `UPDATE trace_spans SET status=?, ended_at=?, attrs_json=? WHERE id=?`, status, now(), `{"error":`+strconv.Quote(errMsg)+`}`, toolSpanID)
 			_ = m.Store.AppendEvent(ctx, runID, stepID, "tool.result", map[string]any{"tool": tc.Name, "status": status, "output": result.Output, "log": result.Log, "error": errMsg})
 			if execErr != nil {
 				messages = append(messages, providers.Message{Role: "tool", ToolCallID: tc.ID, Name: tc.Name, Content: `{"error":` + strconv.Quote(execErr.Error()) + `}`})
@@ -377,7 +405,7 @@ func (m *Manager) rebuildReplayContext(ctx context.Context, runID, sourceRunID s
 			msgs = append(msgs, providers.Message{Role: "tool", ToolCallID: tc.ID, Name: tc.Name, Content: content})
 		}
 		replayed++
-		_, _ = m.DB.ExecContext(ctx, `
+		m.execDB(ctx, "insert replay step", `
 			INSERT INTO run_steps(id,run_id,idx,step_type,status,input_json,output_json,created_at,started_at,ended_at)
 			VALUES(?,?,?,?,?,?,?,?,?,?)
 		`, uuid.NewString(), runID, idx, "replay", "completed",
@@ -392,9 +420,15 @@ func (m *Manager) Wait() {
 }
 
 func (m *Manager) failRun(ctx context.Context, runID string, err error) error {
-	_, _ = m.DB.ExecContext(ctx, `UPDATE runs SET status='failed', error=?, completed_at=?, updated_at=? WHERE id=?`, err.Error(), now(), now(), runID)
+	m.execDB(ctx, "mark run failed", `UPDATE runs SET status='failed', error=?, completed_at=?, updated_at=? WHERE id=?`, err.Error(), now(), now(), runID)
 	_ = m.Store.AppendEvent(ctx, runID, "", "run.failed", map[string]any{"error": err.Error()})
 	return err
+}
+
+func (m *Manager) execDB(ctx context.Context, op, query string, args ...any) {
+	if _, err := m.DB.ExecContext(ctx, query, args...); err != nil {
+		log.Printf("runtime %s failed: %v", op, err)
+	}
 }
 
 func (m *Manager) currentStatus(runID string) (string, error) {
@@ -554,7 +588,10 @@ func (m *Manager) loadSessionResources(ctx context.Context, runID, environmentID
 			if err := rows.Scan(&secretName, &alias, &cipher); err != nil {
 				return res, fmt.Errorf("scan vault secret: %w", err)
 			}
-			value := redactedDecrypt(cipher)
+			value, decErr := secrets.Decrypt(cipher, m.SecretKey)
+			if decErr != nil {
+				return res, fmt.Errorf("decrypt vault secret %s: %w", secretName, decErr)
+			}
 			envName := strings.TrimSpace(alias)
 			if envName == "" {
 				envName = strings.TrimSpace(secretName)
@@ -587,17 +624,12 @@ func parseEnvironmentVars(cfg map[string]any) map[string]string {
 	return out
 }
 
-func redactedDecrypt(cipher string) string {
-	raw, err := hex.DecodeString(strings.TrimSpace(cipher))
-	if err != nil {
-		return ""
+func isEventSequenceConflict(err error) bool {
+	if err == nil {
+		return false
 	}
-	key := byte(0x5A)
-	decoded := make([]byte, len(raw))
-	for i := range raw {
-		decoded[i] = raw[i] ^ key
-	}
-	return string(decoded)
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique constraint failed") && strings.Contains(msg, "events.run_id") && strings.Contains(msg, "events.seq")
 }
 
 func hasAllowedTool(allowedTools []string, name string) bool {

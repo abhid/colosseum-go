@@ -88,7 +88,9 @@ func runServer(args []string) {
 	if err := db.Migrate(database); err != nil {
 		logFatalf("migration failed: %v", err)
 	}
-	if err := tools.EnsureBuiltinDefinitions(context.Background(), database); err != nil {
+	startupCtx, startupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer startupCancel()
+	if err := tools.EnsureBuiltinDefinitions(startupCtx, database); err != nil {
 		logFatalf("tool seed failed: %v", err)
 	}
 
@@ -113,10 +115,17 @@ func runServer(args []string) {
 	if err != nil {
 		logFatalf("docker init failed: %v", err)
 	}
-	if err := dockerMgr.Ping(context.Background()); err != nil {
+	dockerPingCtx, dockerPingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := dockerMgr.Ping(dockerPingCtx); err != nil {
+		dockerPingCancel()
 		logWarnf("docker ping failed: %v", err)
 	} else {
-		_ = dockerMgr.CleanupOrphans(context.Background())
+		dockerPingCancel()
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := dockerMgr.CleanupOrphans(cleanupCtx); err != nil {
+			logWarnf("docker cleanup orphans failed: %v", err)
+		}
+		cleanupCancel()
 	}
 
 	toolExec := &tools.Executor{DB: database, ArtifactsDir: cfg.ArtifactPath, Docker: dockerMgr}
@@ -125,18 +134,20 @@ func runServer(args []string) {
 		Image:    cfg.BrowserImage,
 		Fallback: cfg.BrowserFallback,
 	}
-	runtimeMgr := runtime.NewManager(database, providerMap, toolExec)
+	runtimeMgr := runtime.NewManager(database, providerMap, toolExec, cfg.SecretKey)
 	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
 	defer runtimeCancel()
 	go runtimeMgr.Start(runtimeCtx)
 
-	srv := api.NewServer(database, cfg.WorkspaceRoot, availableProviders, cfg.OpenAIKey, providerMap)
+	srv := api.NewServer(database, cfg.WorkspaceRoot, availableProviders, cfg.OpenAIKey, cfg.SecretKey, cfg.APIAuthToken, providerMap)
 	httpServer := &http.Server{
-		Addr:         cfg.BindAddr,
-		Handler:      srv.Handler(),
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 120 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		Addr:              cfg.BindAddr,
+		Handler:           srv.Handler(),
+		ReadTimeout:       30 * time.Second,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      120 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	go func() {

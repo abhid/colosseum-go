@@ -23,9 +23,18 @@ func Open(path string) (*sql.DB, error) {
 	db.SetMaxOpenConns(8)
 	db.SetMaxIdleConns(4)
 	db.SetConnMaxLifetime(30 * time.Minute)
-	_, _ = db.Exec(`PRAGMA journal_mode=WAL;`)
-	_, _ = db.Exec(`PRAGMA busy_timeout=5000;`)
-	_, _ = db.Exec(`PRAGMA foreign_keys=ON;`)
+	if _, err := db.Exec(`PRAGMA journal_mode=WAL;`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("set journal mode: %w", err)
+	}
+	if _, err := db.Exec(`PRAGMA busy_timeout=5000;`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("set busy timeout: %w", err)
+	}
+	if _, err := db.Exec(`PRAGMA foreign_keys=ON;`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
 	return db, nil
 }
 

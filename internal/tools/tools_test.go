@@ -119,3 +119,22 @@ func TestRewriteDockerSessionPath(t *testing.T) {
 		t.Fatalf("expected rewritten path to stay under session dir, got %q", noEscape)
 	}
 }
+
+func TestSafePathRejectsWorkspacePrefixCollision(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "workspace")
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := safePath(base, "nested/file.txt")
+	if err != nil {
+		t.Fatalf("expected valid path, got %v", err)
+	}
+	if !strings.HasPrefix(allowed, base) {
+		t.Fatalf("expected path under workspace, got %q", allowed)
+	}
+
+	escaped := filepath.Join("..", "outside.txt")
+	if _, err := safePath(base, escaped); err == nil {
+		t.Fatalf("expected escaped path to be rejected")
+	}
+}

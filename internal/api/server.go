@@ -28,6 +28,8 @@ func NewServer(
 	workspaceRoot string,
 	providers map[string]bool,
 	openAIKey string,
+	secretKey string,
+	apiAuthToken string,
 	providerMap map[string]providers.Client,
 ) *Server {
 	s := &Server{DB: db, WorkspaceRoot: workspaceRoot, Providers: providers, ProviderMap: providerMap}
@@ -37,6 +39,9 @@ func NewServer(
 	r.Use(middleware.Recoverer)
 	r.Use(requestLogger())
 	r.Use(timeoutExceptStream(120 * time.Second))
+	if strings.TrimSpace(apiAuthToken) != "" {
+		r.Use(apiAuthMiddleware(apiAuthToken))
+	}
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -49,7 +54,7 @@ func NewServer(
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
 
-	registerAPIRoutes(r, db, workspaceRoot, providers, openAIKey, providerMap)
+	registerAPIRoutes(r, db, workspaceRoot, providers, openAIKey, secretKey, providerMap)
 	mountUI(r)
 
 	s.r = r
@@ -111,6 +116,27 @@ func timeoutExceptStream(d time.Duration) func(http.Handler) http.Handler {
 				return
 			}
 			wrapped.ServeHTTP(w, r)
+		})
+	}
+}
+
+func apiAuthMiddleware(apiAuthToken string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/api/stream/") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			authz := strings.TrimSpace(r.Header.Get("Authorization"))
+			token := strings.TrimSpace(strings.TrimPrefix(authz, "Bearer "))
+			if token == "" {
+				token = strings.TrimSpace(r.Header.Get("X-API-Token"))
+			}
+			if token != strings.TrimSpace(apiAuthToken) {
+				writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+				return
+			}
+			next.ServeHTTP(w, r)
 		})
 	}
 }

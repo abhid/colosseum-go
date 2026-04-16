@@ -20,6 +20,8 @@ type Config struct {
 	DockerImage     string
 	OpenAIKey       string
 	AnthropicKey    string
+	APIAuthToken    string
+	SecretKey       string
 	DefaultModel    string
 	BrowserMode     string
 	BrowserImage    string
@@ -42,6 +44,8 @@ func Load(args []string) (Config, error) {
 		DockerImage:     getenv("COLOSSEUM_DOCKER_IMAGE", "golang:1.25-bookworm"),
 		OpenAIKey:       os.Getenv("OPENAI_API_KEY"),
 		AnthropicKey:    os.Getenv("ANTHROPIC_API_KEY"),
+		APIAuthToken:    os.Getenv("COLOSSEUM_API_AUTH_TOKEN"),
+		SecretKey:       os.Getenv("COLOSSEUM_SECRET_KEY"),
 		DefaultModel:    getenv("COLOSSEUM_DEFAULT_MODEL", "gpt-4.1-mini"),
 		BrowserMode:     getenv("COLOSSEUM_BROWSER_MODE", "docker"),
 		BrowserImage:    getenv("COLOSSEUM_BROWSER_IMAGE", "mcr.microsoft.com/playwright:v1.59.1-jammy"),
@@ -148,6 +152,7 @@ Flags:
 
 Environment:
   OPENAI_API_KEY, ANTHROPIC_API_KEY
+  COLOSSEUM_API_AUTH_TOKEN, COLOSSEUM_SECRET_KEY
   COLOSSEUM_BIND, COLOSSEUM_LISTEN_IP, COLOSSEUM_PORT
   COLOSSEUM_DB_PATH, COLOSSEUM_ARTIFACT_PATH, COLOSSEUM_WORKSPACE_ROOT
   COLOSSEUM_DEFAULT_MODEL, COLOSSEUM_DOCKER_IMAGE, DOCKER_HOST

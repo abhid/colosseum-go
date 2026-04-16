@@ -1,12 +1,27 @@
 BINARY=colosseum
 
-.PHONY: build test run ui-install ui-build dev tidy
+.PHONY: build test test-go test-ui lint lint-go lint-ui check run ui-install ui-build dev tidy
 
 build: ui-build
 	go build -o bin/$(BINARY) ./cmd/colosseum
 
-test:
+test: test-go test-ui
+
+test-go:
 	go test ./...
+
+test-ui:
+	npm --prefix ui run test
+
+lint: lint-go lint-ui
+
+lint-go:
+	go vet ./...
+
+lint-ui:
+	npm --prefix ui run lint
+
+check: lint test ui-build
 
 run:
 	go run ./cmd/colosseum server

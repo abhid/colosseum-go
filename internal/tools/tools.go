@@ -669,7 +669,14 @@ func safePath(workspace, p string) (string, error) {
 	joined := filepath.Join(workspace, p)
 	clean := filepath.Clean(joined)
 	workspaceClean := filepath.Clean(workspace)
-	if !strings.HasPrefix(clean, workspaceClean) {
+	if clean != workspaceClean && !strings.HasPrefix(clean, workspaceClean+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes workspace")
+	}
+	rel, err := filepath.Rel(workspaceClean, clean)
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("path escapes workspace")
 	}
 	return clean, nil

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/adevireddy/colosseum/internal/providers"
+	"github.com/adevireddy/colosseum/internal/secrets"
 	"github.com/adevireddy/colosseum/internal/tools"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -69,6 +70,7 @@ func registerAPIRoutes(
 	workspaceRoot string,
 	availableProviders map[string]bool,
 	openAIKey string,
+	secretKey string,
 	providerMap map[string]providers.Client,
 ) {
 	r.Route("/api", func(r chi.Router) {
@@ -119,7 +121,7 @@ func registerAPIRoutes(
 		r.Put("/policies/{id}", updatePolicyHandler(db))
 		r.Delete("/policies/{id}", deletePolicyHandler(db))
 		r.Get("/secrets", listSecretsHandler(db))
-		r.Post("/secrets", createSecretHandler(db))
+		r.Post("/secrets", createSecretHandler(db, secretKey))
 		r.Delete("/secrets/{name}", deleteSecretHandler(db))
 		r.Get("/provider-configs", listProviderConfigsHandler(db))
 		r.Post("/provider-configs", createProviderConfigHandler(db))
@@ -683,6 +685,11 @@ func createRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid workspace_path"})
 			return
 		}
+		workspacePath, err = ensurePathWithinRoot(workspaceRoot, workspacePath)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "workspace_path must be inside workspace root"})
+			return
+		}
 		if err := os.MkdirAll(workspacePath, 0o755); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to create workspace"})
 			return
@@ -691,6 +698,11 @@ func createRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 			sourcePath, err := filepath.Abs(req.SourceWorkspacePath)
 			if err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid source_workspace_path"})
+				return
+			}
+			sourcePath, err = ensurePathWithinRoot(workspaceRoot, sourcePath)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "source_workspace_path must be inside workspace root"})
 				return
 			}
 			if err := copyDirectory(sourcePath, workspacePath); err != nil {
@@ -706,7 +718,10 @@ func createRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		_, _ = db.ExecContext(r.Context(), `INSERT INTO events(id,run_id,event_type,seq,payload_json,created_at) VALUES(?,?,?,?,?,?)`, uuid.NewString(), id, "run.created", 1, `{"status":"queued"}`, now)
+		if _, err := db.ExecContext(r.Context(), `INSERT INTO events(id,run_id,event_type,seq,payload_json,created_at) VALUES(?,?,?,?,?,?)`, uuid.NewString(), id, "run.created", 1, `{"status":"queued"}`, now); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "run created but failed to append run.created event"})
+			return
+		}
 		writeJSON(w, http.StatusCreated, map[string]any{"id": id, "status": "queued", "workspace_path": workspacePath})
 	}
 }
@@ -861,8 +876,14 @@ func replayRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		_, _ = db.ExecContext(r.Context(), `INSERT INTO events(id,run_id,event_type,seq,payload_json,created_at) VALUES(?,?,?,?,?,?)`,
-			uuid.NewString(), id, "run.created", 1, fmt.Sprintf(`{"status":"queued","replay_source_run_id":"%s","resume_from_step":%d}`, sourceRunID, req.ResumeFromStep), now)
+		if _, err := appendEventWithRetry(r.Context(), db, id, "", "run.created", map[string]any{
+			"status":               "queued",
+			"replay_source_run_id": sourceRunID,
+			"resume_from_step":     req.ResumeFromStep,
+		}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "run created but failed to append run.created event"})
+			return
+		}
 		writeJSON(w, http.StatusCreated, map[string]any{"id": id, "status": "queued", "workspace_path": workspacePath})
 	}
 }
@@ -958,11 +979,31 @@ func getRunTelemetryHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		steps, err := fetchRows(r.Context(), db, `SELECT id,idx,step_type,status,input_json,output_json,error,created_at,started_at,ended_at FROM run_steps WHERE run_id=? ORDER BY idx ASC`, runID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		toolCalls, err := fetchRows(r.Context(), db, `SELECT id,step_id,tool_name,tool_version,input_json,output_json,status,started_at,ended_at,error_class,error_message FROM tool_calls WHERE run_id=? ORDER BY started_at ASC`, runID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		spans, err := fetchRows(r.Context(), db, `SELECT id,parent_id,name,kind,status,started_at,ended_at,attrs_json FROM trace_spans WHERE run_id=? ORDER BY started_at ASC`, runID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		events, err := fetchRows(r.Context(), db, `SELECT id,step_id,event_type,seq,payload_json,created_at FROM events WHERE run_id=? ORDER BY seq ASC`, runID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 		payload := map[string]any{
-			"steps":      fetchRows(r.Context(), db, `SELECT id,idx,step_type,status,input_json,output_json,error,created_at,started_at,ended_at FROM run_steps WHERE run_id=? ORDER BY idx ASC`, runID),
-			"tool_calls": fetchRows(r.Context(), db, `SELECT id,step_id,tool_name,tool_version,input_json,output_json,status,started_at,ended_at,error_class,error_message FROM tool_calls WHERE run_id=? ORDER BY started_at ASC`, runID),
-			"spans":      fetchRows(r.Context(), db, `SELECT id,parent_id,name,kind,status,started_at,ended_at,attrs_json FROM trace_spans WHERE run_id=? ORDER BY started_at ASC`, runID),
-			"events":     fetchRows(r.Context(), db, `SELECT id,step_id,event_type,seq,payload_json,created_at FROM events WHERE run_id=? ORDER BY seq ASC`, runID),
+			"steps":      steps,
+			"tool_calls": toolCalls,
+			"spans":      spans,
+			"events":     events,
 		}
 		writeJSON(w, http.StatusOK, payload)
 	}
@@ -1053,8 +1094,10 @@ func updateRunStatusHandler(db *sql.DB, status string) http.HandlerFunc {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
 			return
 		}
-		seq := nextEventSeq(db, runID)
-		_, _ = db.ExecContext(r.Context(), `INSERT INTO events(id,run_id,event_type,seq,payload_json,created_at) VALUES(?,?,?,?,?,?)`, uuid.NewString(), runID, "run.status", seq, `{"status":"`+status+`"}`, now)
+		if _, err := appendEventWithRetry(r.Context(), db, runID, "", "run.status", map[string]any{"status": status}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("status updated but failed to append run.status event: %v", err)})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": status})
 	}
 }
@@ -1063,10 +1106,18 @@ func approveLatestHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID := chi.URLParam(r, "id")
 		now := time.Now().UTC().Format(time.RFC3339Nano)
-		_, _ = db.ExecContext(r.Context(), `UPDATE approvals SET status='approved', decided_at=?, decided_by='operator' WHERE run_id=? AND status='pending'`, now, runID)
-		_, _ = db.ExecContext(r.Context(), `UPDATE runs SET status='queued', updated_at=? WHERE id=? AND status='interrupted'`, now, runID)
-		seq := nextEventSeq(db, runID)
-		_, _ = db.ExecContext(r.Context(), `INSERT INTO events(id,run_id,event_type,seq,payload_json,created_at) VALUES(?,?,?,?,?,?)`, uuid.NewString(), runID, "approval.approved", seq, `{"by":"operator"}`, now)
+		if _, err := db.ExecContext(r.Context(), `UPDATE approvals SET status='approved', decided_at=?, decided_by='operator' WHERE run_id=? AND status='pending'`, now, runID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if _, err := db.ExecContext(r.Context(), `UPDATE runs SET status='queued', updated_at=? WHERE id=? AND status='interrupted'`, now, runID); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if _, err := appendEventWithRetry(r.Context(), db, runID, "", "approval.approved", map[string]any{"by": "operator"}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "approved"})
 	}
 }
@@ -1079,20 +1130,21 @@ func appendRunEventHandler(db *sql.DB) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 			return
 		}
-		body, _ := json.Marshal(payload)
 		now := time.Now().UTC().Format(time.RFC3339Nano)
-		seq := nextEventSeq(db, runID)
-		_, err := db.ExecContext(r.Context(), `INSERT INTO events(id,run_id,event_type,seq,payload_json,created_at) VALUES(?,?,?,?,?,?)`, uuid.NewString(), runID, "user.event", seq, string(body), now)
+		seq, err := appendEventWithRetry(r.Context(), db, runID, "", "user.event", payload)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		_, _ = db.ExecContext(
+		if _, err := db.ExecContext(
 			r.Context(),
 			`UPDATE runs SET status='queued', completed_at=NULL, error='', updated_at=? WHERE id=? AND status IN ('interrupted','completed','failed','cancelled')`,
 			now,
 			runID,
-		)
+		); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 		var status string
 		_ = db.QueryRowContext(r.Context(), `SELECT status FROM runs WHERE id=?`, runID).Scan(&status)
 		writeJSON(w, http.StatusCreated, map[string]any{"seq": seq, "status": status})
@@ -1189,7 +1241,12 @@ func isUsableOpenAIModel(id string) bool {
 
 func listPoliciesHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, fetchRows(r.Context(), db, `SELECT id,name,definition_json,enabled,created_at,updated_at FROM policies ORDER BY created_at DESC`))
+		rows, err := fetchRows(r.Context(), db, `SELECT id,name,definition_json,enabled,created_at,updated_at FROM policies ORDER BY created_at DESC`)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, rows)
 	}
 }
 
@@ -1271,7 +1328,12 @@ func deletePolicyHandler(db *sql.DB) http.HandlerFunc {
 
 func listSecretsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, fetchRows(r.Context(), db, `SELECT name,created_at,updated_at FROM secrets ORDER BY updated_at DESC`))
+		rows, err := fetchRows(r.Context(), db, `SELECT name,created_at,updated_at FROM secrets ORDER BY updated_at DESC`)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, rows)
 	}
 }
 
@@ -1293,7 +1355,12 @@ func deleteSecretHandler(db *sql.DB) http.HandlerFunc {
 
 func listProviderConfigsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, fetchRows(r.Context(), db, `SELECT id,provider,name,config_json,created_at,updated_at FROM provider_configs ORDER BY updated_at DESC`))
+		rows, err := fetchRows(r.Context(), db, `SELECT id,provider,name,config_json,created_at,updated_at FROM provider_configs ORDER BY updated_at DESC`)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, rows)
 	}
 }
 
@@ -1373,7 +1440,12 @@ func deleteProviderConfigHandler(db *sql.DB) http.HandlerFunc {
 
 func listEnvironmentsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, fetchRows(r.Context(), db, `SELECT id,name,description,config_json,enabled,created_at,updated_at FROM environments ORDER BY updated_at DESC`))
+		rows, err := fetchRows(r.Context(), db, `SELECT id,name,description,config_json,enabled,created_at,updated_at FROM environments ORDER BY updated_at DESC`)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, rows)
 	}
 }
 
@@ -1474,13 +1546,18 @@ func deleteEnvironmentHandler(db *sql.DB) http.HandlerFunc {
 
 func listCredentialVaultsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, fetchRows(r.Context(), db, `
+		rows, err := fetchRows(r.Context(), db, `
 			SELECT v.id,v.name,v.description,v.created_at,v.updated_at,COUNT(i.id) AS item_count
 			FROM credential_vaults v
 			LEFT JOIN credential_vault_items i ON i.vault_id=v.id
 			GROUP BY v.id
 			ORDER BY v.updated_at DESC
-		`))
+		`)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, rows)
 	}
 }
 
@@ -1564,12 +1641,17 @@ func deleteCredentialVaultHandler(db *sql.DB) http.HandlerFunc {
 func listCredentialVaultItemsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vaultID := chi.URLParam(r, "id")
-		writeJSON(w, http.StatusOK, fetchRows(r.Context(), db, `
+		rows, err := fetchRows(r.Context(), db, `
 			SELECT id,vault_id,secret_name,alias,created_at,updated_at
 			FROM credential_vault_items
 			WHERE vault_id=?
 			ORDER BY updated_at DESC
-		`, vaultID))
+		`, vaultID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, rows)
 	}
 }
 
@@ -1629,7 +1711,7 @@ func deleteCredentialVaultItemHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func createSecretHandler(db *sql.DB) http.HandlerFunc {
+func createSecretHandler(db *sql.DB, secretKey string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Name  string `json:"name"`
@@ -1645,24 +1727,18 @@ func createSecretHandler(db *sql.DB) http.HandlerFunc {
 		}
 		id := uuid.NewString()
 		now := time.Now().UTC().Format(time.RFC3339Nano)
-		cipher := redactedEncrypt(req.Value)
-		_, err := db.ExecContext(r.Context(), `INSERT INTO secrets(id,name,cipher_text,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET cipher_text=excluded.cipher_text, updated_at=excluded.updated_at`, id, req.Name, cipher, now, now)
+		cipher, err := secrets.Encrypt(req.Value, secretKey)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to encrypt secret"})
+			return
+		}
+		_, err = db.ExecContext(r.Context(), `INSERT INTO secrets(id,name,cipher_text,created_at,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET cipher_text=excluded.cipher_text, updated_at=excluded.updated_at`, id, req.Name, cipher, now, now)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
 		writeJSON(w, http.StatusCreated, map[string]any{"name": req.Name})
 	}
-}
-
-func redactedEncrypt(value string) string {
-	// V1 local secret obfuscation for at-rest storage; execution paths still scope secrets explicitly.
-	encoded := make([]byte, len(value))
-	key := byte(0x5A)
-	for i := range value {
-		encoded[i] = value[i] ^ key
-	}
-	return fmt.Sprintf("%x", encoded)
 }
 
 func streamRunEventsHandler(db *sql.DB) http.HandlerFunc {
@@ -1781,10 +1857,13 @@ func uploadRunFilesHandler(db *sql.DB) http.HandlerFunc {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to copy uploaded file"})
 				return
 			}
-			_, _ = db.ExecContext(r.Context(), `
+			if _, err := db.ExecContext(r.Context(), `
 				INSERT INTO artifacts(id,run_id,step_id,kind,path,mime_type,size_bytes,created_at)
 				VALUES(?,?,?,?,?,?,?,?)
-			`, uuid.NewString(), runID, "", "uploaded_file", dstPath, fileHeader.Header.Get("Content-Type"), written, nowTs)
+			`, uuid.NewString(), runID, "", "uploaded_file", dstPath, fileHeader.Header.Get("Content-Type"), written, nowTs); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to register uploaded artifact"})
+				return
+			}
 			relPath := strings.TrimPrefix(strings.ReplaceAll(dstPath, filepath.Clean(workspacePath), ""), string(filepath.Separator))
 			uploaded = append(uploaded, map[string]any{
 				"name":       baseName,
@@ -1793,11 +1872,10 @@ func uploadRunFilesHandler(db *sql.DB) http.HandlerFunc {
 			})
 		}
 		if len(uploaded) > 0 {
-			payload, _ := json.Marshal(map[string]any{"count": len(uploaded), "files": uploaded})
-			_, _ = db.ExecContext(r.Context(),
-				`INSERT INTO events(id,run_id,step_id,event_type,seq,payload_json,created_at) VALUES(?,?,?,?,?,?,?)`,
-				uuid.NewString(), runID, "", "session.files_uploaded", nextEventSeq(db, runID), string(payload), nowTs,
-			)
+			if _, err := appendEventWithRetry(r.Context(), db, runID, "", "session.files_uploaded", map[string]any{"count": len(uploaded), "files": uploaded}); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to append upload event: " + err.Error()})
+				return
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"uploaded": uploaded, "count": len(uploaded)})
 	}
@@ -1845,6 +1923,32 @@ func exportRunBundleHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 
+		events, err := fetchRows(r.Context(), db, `SELECT id,step_id,event_type,seq,payload_json,created_at FROM events WHERE run_id=? ORDER BY seq ASC`, runID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		steps, err := fetchRows(r.Context(), db, `SELECT id,idx,step_type,status,input_json,output_json,error,created_at,started_at,ended_at FROM run_steps WHERE run_id=? ORDER BY idx ASC`, runID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		toolCalls, err := fetchRows(r.Context(), db, `SELECT id,step_id,tool_name,input_json,output_json,status,started_at,ended_at,error_class,error_message FROM tool_calls WHERE run_id=? ORDER BY started_at ASC`, runID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		traceSpans, err := fetchRows(r.Context(), db, `SELECT id,parent_id,name,kind,status,started_at,ended_at,attrs_json FROM trace_spans WHERE run_id=? ORDER BY started_at ASC`, runID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		artifacts, err := fetchRows(r.Context(), db, `SELECT id,step_id,kind,path,mime_type,size_bytes,created_at FROM artifacts WHERE run_id=? ORDER BY created_at ASC`, runID)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+
 		bundle := map[string]any{
 			"run": map[string]any{
 				"id": id, "agent_id": agentID, "status": status, "task": task,
@@ -1852,11 +1956,11 @@ func exportRunBundleHandler(db *sql.DB) http.HandlerFunc {
 				"max_steps": maxSteps, "created_at": createdAt, "updated_at": updatedAt,
 				"started_at": startedAt.String, "completed_at": completedAt.String, "error": runErr,
 			},
-			"events":      fetchRows(r.Context(), db, `SELECT id,step_id,event_type,seq,payload_json,created_at FROM events WHERE run_id=? ORDER BY seq ASC`, runID),
-			"steps":       fetchRows(r.Context(), db, `SELECT id,idx,step_type,status,input_json,output_json,error,created_at,started_at,ended_at FROM run_steps WHERE run_id=? ORDER BY idx ASC`, runID),
-			"tool_calls":  fetchRows(r.Context(), db, `SELECT id,step_id,tool_name,input_json,output_json,status,started_at,ended_at,error_class,error_message FROM tool_calls WHERE run_id=? ORDER BY started_at ASC`, runID),
-			"trace_spans": fetchRows(r.Context(), db, `SELECT id,parent_id,name,kind,status,started_at,ended_at,attrs_json FROM trace_spans WHERE run_id=? ORDER BY started_at ASC`, runID),
-			"artifacts":   fetchRows(r.Context(), db, `SELECT id,step_id,kind,path,mime_type,size_bytes,created_at FROM artifacts WHERE run_id=? ORDER BY created_at ASC`, runID),
+			"events":      events,
+			"steps":       steps,
+			"tool_calls":  toolCalls,
+			"trace_spans": traceSpans,
+			"artifacts":   artifacts,
 		}
 		w.Header().Set("Content-Disposition", "attachment; filename=run-"+runID+".json")
 		writeJSON(w, http.StatusOK, bundle)
@@ -1864,17 +1968,20 @@ func exportRunBundleHandler(db *sql.DB) http.HandlerFunc {
 }
 
 func dbRow(ctx context.Context, db *sql.DB, query string, args ...any) map[string]any {
-	rows := fetchRows(ctx, db, query, args...)
+	rows, err := fetchRows(ctx, db, query, args...)
+	if err != nil {
+		return map[string]any{}
+	}
 	if len(rows) == 0 {
 		return map[string]any{}
 	}
 	return rows[0]
 }
 
-func fetchRows(ctx context.Context, db *sql.DB, query string, args ...any) []map[string]any {
+func fetchRows(ctx context.Context, db *sql.DB, query string, args ...any) ([]map[string]any, error) {
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return []map[string]any{{"error": err.Error()}}
+		return nil, err
 	}
 	defer rows.Close()
 	cols, _ := rows.Columns()
@@ -1886,7 +1993,7 @@ func fetchRows(ctx context.Context, db *sql.DB, query string, args ...any) []map
 			ptrs[i] = &values[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
-			continue
+			return nil, err
 		}
 		row := map[string]any{}
 		for i, c := range cols {
@@ -1899,13 +2006,75 @@ func fetchRows(ctx context.Context, db *sql.DB, query string, args ...any) []map
 		}
 		out = append(out, row)
 	}
-	return out
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
-func nextEventSeq(db *sql.DB, runID string) int {
-	var max sql.NullInt64
-	_ = db.QueryRow(`SELECT COALESCE(MAX(seq),0) FROM events WHERE run_id=?`, runID).Scan(&max)
-	return int(max.Int64) + 1
+func ensurePathWithinRoot(rootPath, targetPath string) (string, error) {
+	absRoot, err := filepath.Abs(rootPath)
+	if err != nil {
+		return "", err
+	}
+	absTarget, err := filepath.Abs(targetPath)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(absRoot, absTarget)
+	if err != nil {
+		return "", err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return "", errors.New("path escapes workspace root")
+	}
+	return absTarget, nil
+}
+
+func appendEventWithRetry(ctx context.Context, db *sql.DB, runID, stepID, eventType string, payload map[string]any) (int, error) {
+	const maxAttempts = 3
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return 0, err
+	}
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		seq, appendErr := appendEventOnce(ctx, db, runID, stepID, eventType, string(body))
+		if appendErr == nil {
+			return seq, nil
+		}
+		if !isEventSequenceConflict(appendErr) {
+			return 0, appendErr
+		}
+	}
+	return 0, fmt.Errorf("failed to append event after retries")
+}
+
+func appendEventOnce(ctx context.Context, db *sql.DB, runID, stepID, eventType, payload string) (int, error) {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var seq int
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0)+1 FROM events WHERE run_id=?`, runID).Scan(&seq); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO events(id,run_id,step_id,event_type,seq,payload_json,created_at) VALUES(?,?,?,?,?,?,?)`,
+		uuid.NewString(), runID, stepID, eventType, seq, payload, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return seq, nil
+}
+
+func isEventSequenceConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique constraint failed") && strings.Contains(msg, "events.run_id") && strings.Contains(msg, "events.seq")
 }
 
 func parseTruthy(v string) bool {

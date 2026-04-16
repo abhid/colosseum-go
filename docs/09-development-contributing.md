@@ -17,6 +17,7 @@ From repo root:
 - `make dev` backend + Vite dev
 - `make build` production build (embedded UI)
 - `make test` Go tests
+- `make check` lint + tests + UI build
 - `make ui-build` UI production build
 
 From `ui/`:
@@ -85,7 +86,10 @@ For any feature change:
 
 ## Release Checklist
 
+- `go vet ./...` passes
 - `go test ./...` passes
+- `npm run lint` passes in `ui/`
+- `npm run test` passes in `ui/`
 - `npm run build` passes in `ui/`
 - `make build` passes
 - docs updated and consistent with shipped behavior

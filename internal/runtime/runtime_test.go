@@ -55,7 +55,7 @@ func TestRuntimeCompletesRun(t *testing.T) {
 	}
 
 	p := &fakeProvider{}
-	mgr := NewManager(db, map[string]providers.Client{"openai": p}, &tools.Executor{DB: db, ArtifactsDir: filepath.Join(tmp, "artifacts")})
+	mgr := NewManager(db, map[string]providers.Client{"openai": p}, &tools.Executor{DB: db, ArtifactsDir: filepath.Join(tmp, "artifacts")}, "")
 	mgr.processOne(context.Background())
 
 	deadline := time.Now().Add(5 * time.Second)
