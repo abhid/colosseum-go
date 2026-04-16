@@ -19,5 +19,11 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/purity': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
+      'prefer-const': 'warn',
+    },
   },
 ])

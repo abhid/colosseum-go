@@ -1,19 +1,22 @@
 import { useQuery } from '@tanstack/react-query'
-import { Card, EmptyState, SectionTitle } from '../components/Common'
+import { Card, EmptyState, LoadingState, QueryErrorState, SectionTitle } from '../components/Common'
 import { api } from '../lib/api'
+import { queryKeys } from '../lib/queryKeys'
 
 export function SettingsPage() {
-  const providers = useQuery({ queryKey: ['providers'], queryFn: api.listProviders })
-  const environments = useQuery({ queryKey: ['environments'], queryFn: api.listEnvironments })
-  const vaults = useQuery({ queryKey: ['credential-vaults'], queryFn: api.listCredentialVaults })
+  const providers = useQuery({ queryKey: queryKeys.providers, queryFn: api.listProviders })
+  const environments = useQuery({ queryKey: queryKeys.environments, queryFn: api.listEnvironments })
+  const vaults = useQuery({ queryKey: queryKeys.credentialVaults, queryFn: api.listCredentialVaults })
 
   return (
     <div className="space-y-4">
       <SectionTitle title="Settings" subtitle="Provider and environment status." />
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Providers</h3>
+        {providers.isLoading ? <LoadingState label="Loading providers..." /> : null}
+        <QueryErrorState title="Failed to load providers" query={providers} />
         <div className="space-y-3">
-          {(providers.data ?? []).length === 0 ? <EmptyState title="No providers detected" body="Configure provider credentials and restart the server." /> : (providers.data ?? []).map((p) => (
+          {!providers.isLoading && !providers.isError && (providers.data ?? []).length === 0 ? <EmptyState title="No providers detected" body="Configure provider credentials and restart the server." /> : (providers.data ?? []).map((p) => (
             <div key={p.provider} className="rounded-lg border border-gray-200 p-4 text-sm transition-colors hover:border-gray-300">
               <p className="font-medium capitalize text-gray-900">{p.provider}</p>
               <p className="mt-1 text-gray-500">Tools: {p.supports_tools ? 'Supported' : 'No'} • Streaming: {p.supports_streaming ? 'Supported' : 'No'}</p>
@@ -27,6 +30,8 @@ export function SettingsPage() {
       </Card>
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Managed Runtime Resources</h3>
+        <QueryErrorState title="Failed to load runtime resources" query={environments} />
+        <QueryErrorState title="Failed to load credential vaults" query={vaults} />
         <div className="grid gap-3 md:grid-cols-2">
           <div className="rounded-lg border border-gray-200 p-4">
             <p className="text-xs uppercase tracking-wide text-gray-500">Environments</p>

@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { Card, EmptyState, SectionTitle } from '../components/Common'
+import { Card, EmptyState, LoadingState, QueryErrorState, SectionTitle } from '../components/Common'
 import { api } from '../lib/api'
+import { queryKeys } from '../lib/queryKeys'
 
 export function CredentialVaultsPage() {
   const qc = useQueryClient()
-  const vaults = useQuery({ queryKey: ['ecosystem', 'credential-vaults'], queryFn: api.listCredentialVaults })
-  const secrets = useQuery({ queryKey: ['ecosystem', 'secrets'], queryFn: api.listSecrets })
+  const vaults = useQuery({ queryKey: queryKeys.credentialVaults, queryFn: api.listCredentialVaults })
+  const secrets = useQuery({ queryKey: queryKeys.secrets, queryFn: api.listSecrets })
   const [name, setName] = useState('default-vault')
   const [description, setDescription] = useState('General integration credentials')
   const [selectedVaultID, setSelectedVaultID] = useState('')
@@ -26,26 +27,26 @@ export function CredentialVaultsPage() {
   }, [secrets.data, selectedSecretName])
 
   const vaultItems = useQuery({
-    queryKey: ['ecosystem', 'credential-vaults', selectedVaultID, 'items'],
+    queryKey: queryKeys.credentialVaultItems(selectedVaultID),
     queryFn: () => api.listCredentialVaultItems(selectedVaultID),
     enabled: Boolean(selectedVaultID),
   })
 
   const createVault = useMutation({
     mutationFn: () => api.createCredentialVault({ name, description }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ecosystem', 'credential-vaults'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.credentialVaults }),
   })
   const deleteVault = useMutation({
     mutationFn: (id: string) => api.deleteCredentialVault(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ecosystem', 'credential-vaults'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.credentialVaults }),
   })
   const addVaultItem = useMutation({
     mutationFn: () => api.upsertCredentialVaultItem(selectedVaultID, { secret_name: selectedSecretName, alias: secretAlias }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ecosystem', 'credential-vaults', selectedVaultID, 'items'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.credentialVaultItems(selectedVaultID) }),
   })
   const deleteVaultItem = useMutation({
     mutationFn: (secretName: string) => api.deleteCredentialVaultItem(selectedVaultID, secretName),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ecosystem', 'credential-vaults', selectedVaultID, 'items'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.credentialVaultItems(selectedVaultID) }),
   })
 
   return (
@@ -77,7 +78,9 @@ export function CredentialVaultsPage() {
 
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Vaults</h3>
-        {(vaults.data ?? []).length === 0 ? <EmptyState title="No vaults" body="Create vaults to group secrets for sessions." /> : null}
+        {vaults.isLoading ? <LoadingState label="Loading vaults..." /> : null}
+        <QueryErrorState title="Failed to load vaults" query={vaults} />
+        {!vaults.isLoading && !vaults.isError && (vaults.data ?? []).length === 0 ? <EmptyState title="No vaults" body="Create vaults to group secrets for sessions." /> : null}
         <div className="space-y-2">
           {(vaults.data ?? []).map((vault) => (
             <div key={String(vault.id)} className={`rounded border p-2 text-sm ${selectedVaultID === String(vault.id) ? 'border-gray-400 bg-gray-50' : 'border-gray-200'}`}>
@@ -102,6 +105,7 @@ export function CredentialVaultsPage() {
       {selectedVaultID ? (
         <Card>
           <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Vault Secret Bindings</h3>
+          <QueryErrorState title="Failed to load secrets" query={secrets} />
           <div className="grid gap-2 md:grid-cols-2">
             <select
               className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
@@ -129,6 +133,7 @@ export function CredentialVaultsPage() {
           {(secrets.data ?? []).length === 0 ? (
             <p className="mt-2 text-xs text-gray-500">No secrets available. Add secrets via API before binding them to a vault.</p>
           ) : null}
+          <QueryErrorState title="Failed to load vault items" query={vaultItems} />
           <div className="mt-3 space-y-1">
             {(vaultItems.data ?? []).length === 0 ? <p className="text-xs text-gray-500">No secrets bound to this vault yet.</p> : null}
             {(vaultItems.data ?? []).map((item) => (

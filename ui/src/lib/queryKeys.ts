@@ -1,0 +1,16 @@
+export const queryKeys = {
+  agents: ['agents'] as const,
+  tools: ['tools'] as const,
+  providers: ['providers'] as const,
+  openAIModels: ['providers', 'openai', 'models'] as const,
+  runs: ['runs'] as const,
+  environments: ['environments'] as const,
+  credentialVaults: ['credential-vaults'] as const,
+  policies: ['policies'] as const,
+  secrets: ['secrets'] as const,
+  run: (id: string) => ['run', id] as const,
+  telemetry: (id: string) => ['telemetry', id] as const,
+  artifacts: (id: string) => ['artifacts', id] as const,
+  agent: (id: string) => ['agent', id] as const,
+  credentialVaultItems: (vaultID: string) => ['credential-vaults', vaultID, 'items'] as const,
+}

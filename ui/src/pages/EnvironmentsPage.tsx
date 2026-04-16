@@ -1,23 +1,35 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { IconHelpCircle } from '@tabler/icons-react'
-import { Card, EmptyState, SectionTitle } from '../components/Common'
+import { Card, EmptyState, LoadingState, QueryErrorState, SectionTitle } from '../components/Common'
 import { api } from '../lib/api'
+import { queryKeys } from '../lib/queryKeys'
 
 export function EnvironmentsPage() {
   const qc = useQueryClient()
-  const environments = useQuery({ queryKey: ['ecosystem', 'environments'], queryFn: api.listEnvironments })
+  const environments = useQuery({ queryKey: queryKeys.environments, queryFn: api.listEnvironments })
   const [name, setName] = useState('default-linux')
   const [description, setDescription] = useState('Default isolated execution environment')
   const [config, setConfig] = useState('{"packages":["git","node","python3"],"network":"restricted"}')
 
+  const parsedConfig = useMemo(() => {
+    try {
+      return { value: JSON.parse(config) as Record<string, unknown>, error: '' }
+    } catch (err) {
+      return { value: null, error: err instanceof Error ? err.message : 'Invalid JSON' }
+    }
+  }, [config])
+
   const createEnvironment = useMutation({
-    mutationFn: () => api.createEnvironment({ name, description, config: JSON.parse(config), enabled: true }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ecosystem', 'environments'] }),
+    mutationFn: () => {
+      if (!parsedConfig.value) throw new Error(`Config must be valid JSON: ${parsedConfig.error}`)
+      return api.createEnvironment({ name, description, config: parsedConfig.value, enabled: true })
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.environments }),
   })
   const deleteEnvironment = useMutation({
     mutationFn: (id: string) => api.deleteEnvironment(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ecosystem', 'environments'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.environments }),
   })
 
   return (
@@ -68,9 +80,10 @@ export function EnvironmentsPage() {
           value={config}
           onChange={(e) => setConfig(e.target.value)}
         />
+        {parsedConfig.error ? <p className="mt-2 text-xs text-red-600">Config JSON error: {parsedConfig.error}</p> : null}
         <button
           className="mt-4 h-9 rounded-md bg-gray-900 px-4 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
-          disabled={createEnvironment.isPending}
+          disabled={createEnvironment.isPending || Boolean(parsedConfig.error)}
           onClick={() => createEnvironment.mutate()}
         >
           {createEnvironment.isPending ? 'Creating...' : 'Create Environment'}
@@ -80,7 +93,9 @@ export function EnvironmentsPage() {
 
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Existing Environments</h3>
-        {(environments.data ?? []).length === 0 ? <EmptyState title="No environments" body="Add reusable runtime environment profiles." /> : null}
+        {environments.isLoading ? <LoadingState label="Loading environments..." /> : null}
+        <QueryErrorState title="Failed to load environments" query={environments} />
+        {!environments.isLoading && !environments.isError && (environments.data ?? []).length === 0 ? <EmptyState title="No environments" body="Add reusable runtime environment profiles." /> : null}
         <div className="space-y-2">
           {(environments.data ?? []).map((env) => (
             <div key={String(env.id)} className="flex items-center justify-between rounded border border-gray-200 p-2 text-sm">

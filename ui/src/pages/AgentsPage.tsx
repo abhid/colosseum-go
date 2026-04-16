@@ -3,14 +3,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChevronDown, Pencil, Sparkles, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
-import { Card, EmptyState, SectionTitle } from '../components/Common'
+import { Card, EmptyState, LoadingState, QueryErrorState, SectionTitle } from '../components/Common'
+import { queryKeys } from '../lib/queryKeys'
 
 export function AgentsPage() {
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const agents = useQuery({ queryKey: ['agents'], queryFn: api.listAgents })
-  const toolsQ = useQuery({ queryKey: ['tools'], queryFn: api.listTools })
-  const providersQ = useQuery({ queryKey: ['providers'], queryFn: api.listProviders })
+  const agents = useQuery({ queryKey: queryKeys.agents, queryFn: api.listAgents })
+  const toolsQ = useQuery({ queryKey: queryKeys.tools, queryFn: api.listTools })
+  const providersQ = useQuery({ queryKey: queryKeys.providers, queryFn: api.listProviders })
   const availableTools = useMemo(
     () =>
       (toolsQ.data ?? [])
@@ -20,11 +21,11 @@ export function AgentsPage() {
   )
   const providerIDs = useMemo(() => (providersQ.data ?? []).map((p) => p.provider), [providersQ.data])
   const openAIModelsQ = useQuery({
-    queryKey: ['providers', 'openai', 'models'],
+    queryKey: queryKeys.openAIModels,
     queryFn: api.listOpenAIModels,
     enabled: providerIDs.includes('openai'),
   })
-  const openAIModels = openAIModelsQ.data ?? []
+  const openAIModels = useMemo(() => openAIModelsQ.data ?? [], [openAIModelsQ.data])
   const [form, setForm] = useState({
     name: '',
     description: '',
@@ -140,7 +141,7 @@ export function AgentsPage() {
       setCreateConfigError('')
       setIsEditingCreateConfig(false)
       setIsCreateOpen(false)
-      qc.invalidateQueries({ queryKey: ['agents'] })
+      qc.invalidateQueries({ queryKey: queryKeys.agents })
     },
   })
 
@@ -163,7 +164,7 @@ export function AgentsPage() {
       api.updateAgent(payload.id, payload.body),
     onSuccess: () => {
       setEditId('')
-      qc.invalidateQueries({ queryKey: ['agents'] })
+      qc.invalidateQueries({ queryKey: queryKeys.agents })
     },
   })
   const deleteAgent = useMutation({
@@ -171,7 +172,7 @@ export function AgentsPage() {
     onSuccess: () => {
       setDeleteError('')
       if (editId) setEditId('')
-      qc.invalidateQueries({ queryKey: ['agents'] })
+      qc.invalidateQueries({ queryKey: queryKeys.agents })
     },
   })
   const generateCreateAgent = useMutation({
@@ -284,10 +285,14 @@ export function AgentsPage() {
 
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Agent Definitions</h3>
+        <QueryErrorState title="Failed to load agents" query={agents} />
+        <QueryErrorState title="Failed to load tools" query={toolsQ} />
+        <QueryErrorState title="Failed to load providers" query={providersQ} />
+        {agents.isLoading ? <LoadingState label="Loading agents..." /> : null}
         {deleteError ? (
           <p className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{deleteError}</p>
         ) : null}
-        {(agents.data ?? []).length === 0 ? <EmptyState title="No agents" body="Create an agent profile to start sessions." /> : (
+        {!agents.isLoading && !agents.isError && (agents.data ?? []).length === 0 ? <EmptyState title="No agents" body="Create an agent profile to start sessions." /> : (
           <div className="space-y-3">
             {(agents.data ?? []).map((a) => (
               <div key={a.id} className="group cursor-pointer rounded-lg border border-gray-200 p-4 transition-colors hover:border-gray-300" onClick={() => navigate(`/agents/${a.id}`)}>

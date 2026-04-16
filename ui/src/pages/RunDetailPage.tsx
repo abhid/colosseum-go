@@ -19,6 +19,7 @@ import {
 } from '@tabler/icons-react'
 import { api } from '../lib/api'
 import type { Artifact, TraceSpan } from '../lib/types'
+import { queryKeys } from '../lib/queryKeys'
 
 import { formatDistanceToNow } from 'date-fns'
 
@@ -42,6 +43,7 @@ type DisplayArtifact = Artifact & {
 }
 
 type ActorLaneId = 'orchestrator' | 'tools' | 'system' | 'user'
+const activeActors: ActorLaneId[] = ['orchestrator', 'tools', 'system', 'user']
 
 const roleColors: Record<string, string> = {
   Running: 'bg-[#e5e7eb] text-gray-700',
@@ -77,24 +79,23 @@ export function RunDetailPage() {
   const [expandedEventRowID, setExpandedEventRowID] = useState('')
   const [isArtifactsModalOpen, setIsArtifactsModalOpen] = useState(false)
   const [hoveredTimelineSpanID, setHoveredTimelineSpanID] = useState('')
-  const activeActors: ActorLaneId[] = ['orchestrator', 'tools', 'system', 'user']
 
   const steer = useMutation({ mutationFn: () => api.steerRun(id, { message: steerText }), onSuccess: () => setSteerText('') })
 
-  const runQ = useQuery({ queryKey: ['run', id], queryFn: () => api.getRun(id), enabled: Boolean(id), refetchInterval: 1800 })
-  const agentQ = useQuery({ queryKey: ['agent', runQ.data?.agent_id], queryFn: () => api.listAgents().then(agents => agents.find(a => a.id === runQ.data?.agent_id)), enabled: Boolean(runQ.data?.agent_id) })
-  const environmentsQ = useQuery({ queryKey: ['environments'], queryFn: api.listEnvironments })
-  const vaultsQ = useQuery({ queryKey: ['credential-vaults'], queryFn: api.listCredentialVaults })
-  const telemetryQ = useQuery({ queryKey: ['telemetry', id], queryFn: () => api.getRunTelemetry(id), enabled: Boolean(id), refetchInterval: 1800 })
-  const artifactsQ = useQuery({ queryKey: ['artifacts', id], queryFn: () => api.getRunArtifacts(id), enabled: Boolean(id), refetchInterval: 2500 })
+  const runQ = useQuery({ queryKey: queryKeys.run(id), queryFn: () => api.getRun(id), enabled: Boolean(id), refetchInterval: 1800 })
+  const agentQ = useQuery({ queryKey: queryKeys.agent(runQ.data?.agent_id || ''), queryFn: () => api.listAgents().then(agents => agents.find(a => a.id === runQ.data?.agent_id)), enabled: Boolean(runQ.data?.agent_id) })
+  const environmentsQ = useQuery({ queryKey: queryKeys.environments, queryFn: api.listEnvironments })
+  const vaultsQ = useQuery({ queryKey: queryKeys.credentialVaults, queryFn: api.listCredentialVaults })
+  const telemetryQ = useQuery({ queryKey: queryKeys.telemetry(id), queryFn: () => api.getRunTelemetry(id), enabled: Boolean(id), refetchInterval: 1800 })
+  const artifactsQ = useQuery({ queryKey: queryKeys.artifacts(id), queryFn: () => api.getRunArtifacts(id), enabled: Boolean(id), refetchInterval: 2500 })
 
   useEffect(() => {
     if (!id) return
     const es = new EventSource(`/api/stream/sessions/${id}`)
     es.addEventListener('run_event', () => {
-      qc.invalidateQueries({ queryKey: ['telemetry', id] })
-      qc.invalidateQueries({ queryKey: ['run', id] })
-      qc.invalidateQueries({ queryKey: ['artifacts', id] })
+      qc.invalidateQueries({ queryKey: queryKeys.telemetry(id) })
+      qc.invalidateQueries({ queryKey: queryKeys.run(id) })
+      qc.invalidateQueries({ queryKey: queryKeys.artifacts(id) })
     })
     return () => es.close()
   }, [id, qc])
@@ -140,11 +141,11 @@ export function RunDetailPage() {
   }, [telemetry, stepDurationByID, toolDurationByStepID])
 
   const filteredEvents = useMemo(() => {
-    let out = eventRows.filter((ev) => activeActors.includes(ev.actor))
+    const out = eventRows.filter((ev) => activeActors.includes(ev.actor))
     if (!filterText.trim()) return out
     const q = filterText.toLowerCase()
     return out.filter((ev) => `${ev.event_type} ${JSON.stringify(ev.parsed)}`.toLowerCase().includes(q))
-  }, [eventRows, filterText, activeActors])
+  }, [eventRows, filterText])
 
   const displayArtifacts = useMemo<DisplayArtifact[]>(() => {
     const persisted = artifactsQ.data ?? []
@@ -192,7 +193,7 @@ export function RunDetailPage() {
       .map((s) => ({ ...s, __start: parseTimeMs(s.started_at), __end: parseTimeMs(s.ended_at), __actor: actorFromSpan(s) }))
       .filter((s) => Number.isFinite(s.__start))
       .filter((s) => activeActors.includes(s.__actor))
-  }, [telemetry, activeActors])
+  }, [telemetry])
 
   const timeline = useMemo(() => {
     if (spans.length === 0) return null

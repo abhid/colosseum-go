@@ -1,4 +1,5 @@
 import type { PropsWithChildren } from 'react'
+import type { UseQueryResult } from '@tanstack/react-query'
 
 export function Card({ children }: PropsWithChildren) {
   return <div className="min-w-0 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">{children}</div>
@@ -32,6 +33,20 @@ export function EmptyState({ title, body }: { title: string; body: string }) {
     <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50/50 p-8 text-center">
       <h3 className="text-sm font-medium text-gray-900">{title}</h3>
       <p className="mt-1 text-sm text-gray-500">{body}</p>
+    </div>
+  )
+}
+
+export function LoadingState({ label = 'Loading...' }: { label?: string }) {
+  return <p className="text-sm text-gray-500">{label}</p>
+}
+
+export function QueryErrorState({ title = 'Unable to load data', query }: { title?: string; query: UseQueryResult<unknown, Error> }) {
+  if (!query.isError) return null
+  return (
+    <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+      <p className="font-medium">{title}</p>
+      <p className="mt-1 text-xs">{query.error?.message ?? 'Unknown error'}</p>
     </div>
   )
 }

@@ -1,21 +1,33 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
-import { Card, EmptyState, SectionTitle } from '../components/Common'
+import { useMemo, useState } from 'react'
+import { Card, EmptyState, LoadingState, QueryErrorState, SectionTitle } from '../components/Common'
 import { api } from '../lib/api'
+import { queryKeys } from '../lib/queryKeys'
 
 export function PoliciesPage() {
   const qc = useQueryClient()
-  const policies = useQuery({ queryKey: ['ecosystem', 'policies'], queryFn: api.listPolicies })
+  const policies = useQuery({ queryKey: queryKeys.policies, queryFn: api.listPolicies })
   const [name, setName] = useState('Default Safety')
   const [definition, setDefinition] = useState('{"deny_commands":["rm -rf /"]}')
 
+  const parsedDefinition = useMemo(() => {
+    try {
+      return { value: JSON.parse(definition) as Record<string, unknown>, error: '' }
+    } catch (err) {
+      return { value: null, error: err instanceof Error ? err.message : 'Invalid JSON' }
+    }
+  }, [definition])
+
   const createPolicy = useMutation({
-    mutationFn: () => api.createPolicy({ name, definition: JSON.parse(definition), enabled: true }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ecosystem', 'policies'] }),
+    mutationFn: () => {
+      if (!parsedDefinition.value) throw new Error(`Definition must be valid JSON: ${parsedDefinition.error}`)
+      return api.createPolicy({ name, definition: parsedDefinition.value, enabled: true })
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.policies }),
   })
   const deletePolicy = useMutation({
     mutationFn: (id: string) => api.deletePolicy(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ecosystem', 'policies'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.policies }),
   })
 
   return (
@@ -34,9 +46,10 @@ export function PoliciesPage() {
           value={definition}
           onChange={(e) => setDefinition(e.target.value)}
         />
+        {parsedDefinition.error ? <p className="mt-2 text-xs text-red-600">Definition JSON error: {parsedDefinition.error}</p> : null}
         <button
           className="mt-4 h-9 rounded-md bg-gray-900 px-4 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
-          disabled={createPolicy.isPending}
+          disabled={createPolicy.isPending || Boolean(parsedDefinition.error)}
           onClick={() => createPolicy.mutate()}
         >
           {createPolicy.isPending ? 'Creating...' : 'Create Policy'}
@@ -46,7 +59,9 @@ export function PoliciesPage() {
 
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Existing Policies</h3>
-        {(policies.data ?? []).length === 0 ? <EmptyState title="No policies" body="Create policy rules for governance." /> : null}
+        {policies.isLoading ? <LoadingState label="Loading policies..." /> : null}
+        <QueryErrorState title="Failed to load policies" query={policies} />
+        {!policies.isLoading && !policies.isError && (policies.data ?? []).length === 0 ? <EmptyState title="No policies" body="Create policy rules for governance." /> : null}
         <div className="space-y-2">
           {(policies.data ?? []).map((policy) => (
             <div key={String(policy.id)} className="flex items-center justify-between rounded border border-gray-200 p-2 text-sm">

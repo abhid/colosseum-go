@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
-import { Card, EmptyState, SectionTitle, StatusBadge } from '../components/Common'
+import { Card, EmptyState, LoadingState, QueryErrorState, SectionTitle, StatusBadge } from '../components/Common'
+import { queryKeys } from '../lib/queryKeys'
 
 export function RunsPage() {
   const navigate = useNavigate()
@@ -17,10 +18,10 @@ export function RunsPage() {
   })
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
 
-  const agents = useQuery({ queryKey: ['agents'], queryFn: api.listAgents })
-  const environments = useQuery({ queryKey: ['environments'], queryFn: api.listEnvironments })
-  const vaults = useQuery({ queryKey: ['credential-vaults'], queryFn: api.listCredentialVaults })
-  const runs = useQuery({ queryKey: ['runs'], queryFn: api.listRuns, refetchInterval: 2000 })
+  const agents = useQuery({ queryKey: queryKeys.agents, queryFn: api.listAgents })
+  const environments = useQuery({ queryKey: queryKeys.environments, queryFn: api.listEnvironments })
+  const vaults = useQuery({ queryKey: queryKeys.credentialVaults, queryFn: api.listCredentialVaults })
+  const runs = useQuery({ queryKey: queryKeys.runs, queryFn: api.listRuns, refetchInterval: 2000 })
 
   const createRun = useMutation({
     mutationFn: async () => {
@@ -39,7 +40,7 @@ export function RunsPage() {
       return created
     },
     onSuccess: (res) => {
-      qc.invalidateQueries({ queryKey: ['runs'] })
+      qc.invalidateQueries({ queryKey: queryKeys.runs })
       setIsCreateOpen(false)
       setSelectedFiles([])
       setForm({ title: '', agent_id: '', task: '', environment_id: '', credential_vault_id: '' })
@@ -86,8 +87,9 @@ export function RunsPage() {
 
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Recent Sessions</h3>
-        {runs.isLoading ? <p className="text-sm text-gray-500">Loading sessions...</p> : null}
-        {sortedRuns.length === 0 ? <EmptyState title="No sessions yet" body="Create your first session to start execution." /> : null}
+        {runs.isLoading ? <LoadingState label="Loading sessions..." /> : null}
+        <QueryErrorState title="Failed to load sessions" query={runs} />
+        {!runs.isLoading && !runs.isError && sortedRuns.length === 0 ? <EmptyState title="No sessions yet" body="Create your first session to start execution." /> : null}
         {sortedRuns.length > 0 ? (
           <div className="overflow-x-auto rounded-lg border border-gray-200">
             <table className="w-full text-left text-sm">

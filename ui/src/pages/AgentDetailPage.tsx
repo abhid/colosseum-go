@@ -4,21 +4,22 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Sparkles, Trash2 } from 'lucide-react'
 import { EmptyState, SectionTitle } from '../components/Common'
 import { api } from '../lib/api'
+import { queryKeys } from '../lib/queryKeys'
 
 export function AgentDetailPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const agentsQ = useQuery({ queryKey: ['agents'], queryFn: api.listAgents })
-  const toolsQ = useQuery({ queryKey: ['tools'], queryFn: api.listTools })
-  const providersQ = useQuery({ queryKey: ['providers'], queryFn: api.listProviders })
+  const agentsQ = useQuery({ queryKey: queryKeys.agents, queryFn: api.listAgents })
+  const toolsQ = useQuery({ queryKey: queryKeys.tools, queryFn: api.listTools })
+  const providersQ = useQuery({ queryKey: queryKeys.providers, queryFn: api.listProviders })
   const providerIDs = useMemo(() => (providersQ.data ?? []).map((p) => p.provider), [providersQ.data])
   const openAIModelsQ = useQuery({
-    queryKey: ['providers', 'openai', 'models'],
+    queryKey: queryKeys.openAIModels,
     queryFn: api.listOpenAIModels,
     enabled: providerIDs.includes('openai'),
   })
-  const openAIModels = openAIModelsQ.data ?? []
+  const openAIModels = useMemo(() => openAIModelsQ.data ?? [], [openAIModelsQ.data])
   const agent = useMemo(() => (agentsQ.data ?? []).find((a) => a.id === id), [agentsQ.data, id])
   const availableTools = useMemo(
     () =>
@@ -96,7 +97,7 @@ export function AgentDetailPage() {
         default_workspace_path: form.default_workspace_path,
       }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['agents'] })
+      qc.invalidateQueries({ queryKey: queryKeys.agents })
     },
   })
 
@@ -119,7 +120,7 @@ export function AgentDetailPage() {
   const deleteAgent = useMutation({
     mutationFn: (force: boolean) => api.deleteAgent(id, force),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['agents'] })
+      qc.invalidateQueries({ queryKey: queryKeys.agents })
       navigate('/agents')
     },
   })

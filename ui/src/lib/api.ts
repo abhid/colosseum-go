@@ -2,24 +2,28 @@ import type { Agent, Artifact, ProviderInfo, Run, RunEvent, RunTelemetry, ToolDe
 
 const jsonHeaders = { 'Content-Type': 'application/json' }
 
+async function parseErrorMessage(res: Response): Promise<string> {
+  const raw = await res.text()
+  let message = raw
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      if (typeof parsed.error === 'string' && parsed.error.trim()) {
+        message = parsed.error
+      } else if (typeof parsed.message === 'string' && parsed.message.trim()) {
+        message = parsed.message
+      }
+    } catch {
+      // Keep raw response text as message.
+    }
+  }
+  return message || `Request failed: ${res.status}`
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init)
   if (!res.ok) {
-    const raw = await res.text()
-    let message = raw
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as Record<string, unknown>
-        if (typeof parsed.error === 'string' && parsed.error.trim()) {
-          message = parsed.error
-        } else if (typeof parsed.message === 'string' && parsed.message.trim()) {
-          message = parsed.message
-        }
-      } catch {
-        // Keep raw response text as message.
-      }
-    }
-    throw new Error(message || `Request failed: ${res.status}`)
+    throw new Error(await parseErrorMessage(res))
   }
   return res.json() as Promise<T>
 }
@@ -62,8 +66,7 @@ export const api = {
     for (const file of files) form.append('files', file, file.name)
     const res = await fetch(`/api/sessions/${id}/files`, { method: 'POST', body: form })
     if (!res.ok) {
-      const raw = await res.text()
-      throw new Error(raw || `File upload failed: ${res.status}`)
+      throw new Error(await parseErrorMessage(res))
     }
     return res.json() as Promise<{ uploaded: Array<Record<string, unknown>>; count: number }>
   },

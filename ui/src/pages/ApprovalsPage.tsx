@@ -1,17 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { Card, EmptyState, SectionTitle, StatusBadge } from '../components/Common'
+import { Card, EmptyState, LoadingState, QueryErrorState, SectionTitle, StatusBadge } from '../components/Common'
 import { useNavigate } from 'react-router-dom'
+import { queryKeys } from '../lib/queryKeys'
 
 export function ApprovalsPage() {
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const runs = useQuery({ queryKey: ['runs'], queryFn: api.listRuns, refetchInterval: 2000 })
+  const runs = useQuery({ queryKey: queryKeys.runs, queryFn: api.listRuns, refetchInterval: 2000 })
   const waiting = (runs.data ?? []).filter((r) => r.status === 'interrupted')
   const approve = useMutation({
     mutationFn: (id: string) => api.approveRun(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['runs'] })
+      qc.invalidateQueries({ queryKey: queryKeys.runs })
     },
   })
 
@@ -20,7 +21,9 @@ export function ApprovalsPage() {
       <SectionTitle title="Approvals" subtitle="Review sessions waiting for operator action." />
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Pending Approval Queue</h3>
-        {waiting.length === 0 ? <EmptyState title="No pending approvals" body="Interrupted sessions requiring approval appear here." /> : (
+        {runs.isLoading ? <LoadingState label="Loading approvals..." /> : null}
+        <QueryErrorState title="Failed to load approvals" query={runs} />
+        {!runs.isLoading && !runs.isError && waiting.length === 0 ? <EmptyState title="No pending approvals" body="Interrupted sessions requiring approval appear here." /> : (
           <div className="space-y-3">
             {waiting.map((r) => (
               <div key={r.id} className="rounded-lg border border-gray-200 p-4 transition-colors hover:border-gray-300">

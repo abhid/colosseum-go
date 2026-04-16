@@ -1,11 +1,12 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import { Card, EmptyState, SectionTitle } from '../components/Common'
+import { Card, EmptyState, LoadingState, QueryErrorState, SectionTitle } from '../components/Common'
 import type { ToolDef } from '../lib/types'
+import { queryKeys } from '../lib/queryKeys'
 
 export function ToolsPage() {
-  const toolsQuery = useQuery({ queryKey: ['tools'], queryFn: api.listTools, refetchInterval: 3000 })
+  const toolsQuery = useQuery({ queryKey: queryKeys.tools, queryFn: api.listTools, refetchInterval: 3000 })
 
   const defs = useMemo(() => (toolsQuery.data ?? []) as ToolDef[], [toolsQuery.data])
 
@@ -25,7 +26,9 @@ export function ToolsPage() {
 
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Registered Tools</h3>
-        {defs.length === 0 ? <EmptyState title="No tools" body="No tools are registered in this runtime." /> : (
+        {toolsQuery.isLoading ? <LoadingState label="Loading tools..." /> : null}
+        <QueryErrorState title="Failed to load tools" query={toolsQuery} />
+        {!toolsQuery.isLoading && !toolsQuery.isError && defs.length === 0 ? <EmptyState title="No tools" body="No tools are registered in this runtime." /> : (
           <div className="space-y-3">
             {defs.map((t) => (
               <div key={t.id} className="rounded-lg border border-gray-200 p-4 transition-colors hover:border-gray-300">
