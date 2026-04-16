@@ -9,6 +9,21 @@ import (
 
 const maxContractInputBytes = 256 * 1024
 
+var artifactContentURLPattern = regexp.MustCompile(`(?i)/api/runs/[^/\s)]+/artifacts/[^/\s)]+/content`)
+
+type mediaEvidence struct {
+	Images int
+	Videos int
+	Audios int
+}
+
+type mediaClaim struct {
+	ClaimsDelivery bool
+	MentionsImage  bool
+	MentionsVideo  bool
+	MentionsAudio  bool
+}
+
 func validateOutputContract(contractType, payload, output string) (bool, string) {
 	contractType = normalizeContractType(contractType)
 	output = strings.TrimSpace(output)
@@ -125,4 +140,44 @@ func truncateForEvent(value string, maxLen int) string {
 		return value
 	}
 	return value[:maxLen-1] + "..."
+}
+
+func validateProvenanceOutputContract(output string, media mediaEvidence) (bool, string) {
+	normalized := strings.ToLower(strings.TrimSpace(output))
+	if normalized == "" {
+		return true, "empty output"
+	}
+	claim := parseMediaClaim(normalized)
+	if claim.ClaimsDelivery && claim.MentionsImage && media.Images == 0 {
+		return false, "response claims screenshot/image attachment but no image artifact exists"
+	}
+	if claim.ClaimsDelivery && claim.MentionsVideo && media.Videos == 0 {
+		return false, "response claims video attachment but no video artifact exists"
+	}
+	if claim.ClaimsDelivery && claim.MentionsAudio && media.Audios == 0 {
+		return false, "response claims audio attachment but no audio artifact exists"
+	}
+	if claim.ClaimsDelivery && (claim.MentionsImage || claim.MentionsVideo || claim.MentionsAudio) && !hasArtifactContentLink(output) {
+		return false, "response claims attachment but does not include an artifact content link"
+	}
+	return true, "provenance media contract passed"
+}
+
+func parseMediaClaim(normalizedOutput string) mediaClaim {
+	claim := mediaClaim{
+		MentionsImage: strings.Contains(normalizedOutput, "screenshot") || strings.Contains(normalizedOutput, "image") || strings.Contains(normalizedOutput, "photo"),
+		MentionsVideo: strings.Contains(normalizedOutput, "video"),
+		MentionsAudio: strings.Contains(normalizedOutput, "audio"),
+	}
+	for _, marker := range []string{"attached", "attachment", "included", "here's", "here is", "below"} {
+		if strings.Contains(normalizedOutput, marker) {
+			claim.ClaimsDelivery = true
+			break
+		}
+	}
+	return claim
+}
+
+func hasArtifactContentLink(output string) bool {
+	return artifactContentURLPattern.MatchString(output)
 }

@@ -27,3 +27,46 @@ func TestValidateOutputContract(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateProvenanceOutputContract(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		media  mediaEvidence
+		wantOK bool
+	}{
+		{
+			name:   "screenshot claim fails without image artifact",
+			output: "Here's a screenshot of Yahoo.",
+			media:  mediaEvidence{Images: 0},
+			wantOK: false,
+		},
+		{
+			name:   "screenshot claim still fails without link even with image artifact",
+			output: "Here's a screenshot of Yahoo.",
+			media:  mediaEvidence{Images: 1},
+			wantOK: false,
+		},
+		{
+			name:   "screenshot claim passes with image artifact and link",
+			output: "Screenshot attached below.\n\n[Screenshot](/api/runs/run-id/artifacts/artifact-id/content)",
+			media:  mediaEvidence{Images: 1},
+			wantOK: true,
+		},
+		{
+			name:   "non-media response passes without artifacts",
+			output: "Completed the task.",
+			media:  mediaEvidence{},
+			wantOK: true,
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			ok, _ := validateProvenanceOutputContract(tc.output, tc.media)
+			if ok != tc.wantOK {
+				t.Fatalf("expected ok=%v, got %v", tc.wantOK, ok)
+			}
+		})
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/adevireddy/colosseum/internal/providers"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
@@ -240,7 +241,7 @@ func listChatSessionMessagesHandler(db *sql.DB) http.HandlerFunc {
 	}
 }
 
-func createChatSessionMessageHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
+func createChatSessionMessageHandler(db *sql.DB, workspaceRoot string, providerMap map[string]providers.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sessionID := chi.URLParam(r, "id")
 		var req createChatSessionMessageRequest
@@ -277,6 +278,7 @@ func createChatSessionMessageHandler(db *sql.DB, workspaceRoot string) http.Hand
 		writeJSON(w, http.StatusCreated, map[string]any{
 			"session_id": sessionID, "run_id": runID, "turn_index": turnIndex, "status": "queued",
 		})
+		go maybeGenerateChatSessionTitle(context.Background(), db, providerMap, sessionID, turnIndex)
 	}
 }
 
@@ -596,6 +598,166 @@ func latestTurnIndexForSession(ctx context.Context, db *sql.DB, sessionID string
 		return 1
 	}
 	return turn
+}
+
+func maybeGenerateChatSessionTitle(ctx context.Context, db *sql.DB, providerMap map[string]providers.Client, sessionID string, turnIndex int) {
+	// Multi-pass retitling windows: early summarize, then refinement after more context.
+	if !shouldRetitleAtTurn(turnIndex) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 14*time.Second)
+	defer cancel()
+
+	var title, agentID string
+	if err := db.QueryRowContext(ctx, `SELECT title,agent_id FROM chat_sessions WHERE id=?`, sessionID).Scan(&title, &agentID); err != nil {
+		return
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "New chat session"
+	}
+
+	var providerName, modelName string
+	if err := db.QueryRowContext(ctx, `SELECT provider,model FROM agents WHERE id=?`, agentID).Scan(&providerName, &modelName); err != nil {
+		return
+	}
+	client := providerMap[strings.ToLower(strings.TrimSpace(providerName))]
+	if client == nil {
+		return
+	}
+
+	rows, err := db.QueryContext(ctx, `
+		SELECT role,content
+		FROM chat_messages
+		WHERE session_id=?
+		ORDER BY turn_index ASC, created_at ASC
+		LIMIT 20
+	`, sessionID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	lines := make([]string, 0, 24)
+	for rows.Next() {
+		var role, content string
+		if err := rows.Scan(&role, &content); err != nil {
+			return
+		}
+		content = strings.TrimSpace(content)
+		if content == "" {
+			continue
+		}
+		if len(content) > 220 {
+			content = content[:220] + "..."
+		}
+		lines = append(lines, fmt.Sprintf("%s: %s", strings.ToLower(strings.TrimSpace(role)), content))
+	}
+	if len(lines) < 3 {
+		return
+	}
+
+	summaryPrompt := strings.TrimSpace(`
+Generate a concise chat session title from this conversation.
+Rules:
+- 3 to 7 words.
+- User-facing and specific.
+- No punctuation at the end.
+- No quotes, no markdown, no IDs.
+- Return title text only.
+`)
+	chatText := strings.Join(lines, "\n")
+	resp, err := client.Complete(ctx, providers.CompletionRequest{
+		Model:  modelName,
+		System: summaryPrompt,
+		Messages: []providers.Message{
+			{Role: "user", Content: chatText},
+		},
+		Tools:   []providers.Tool{},
+		Timeout: 12 * time.Second,
+	})
+	if err != nil {
+		return
+	}
+	newTitle := sanitizeGeneratedTitle(resp.Text)
+	if newTitle == "" || strings.EqualFold(newTitle, title) {
+		return
+	}
+	if !shouldReplaceSessionTitle(title, newTitle, turnIndex) {
+		return
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE chat_sessions SET title=?, updated_at=? WHERE id=?`, newTitle, time.Now().UTC().Format(time.RFC3339Nano), sessionID); err != nil {
+		return
+	}
+	var latestRunID string
+	if err := db.QueryRowContext(ctx, `SELECT run_id FROM session_runs WHERE session_id=? ORDER BY turn_index DESC LIMIT 1`, sessionID).Scan(&latestRunID); err != nil {
+		return
+	}
+	if strings.TrimSpace(latestRunID) == "" {
+		return
+	}
+	_, _ = appendEventWithRetry(ctx, db, latestRunID, "", "chat.session_title_updated", map[string]any{
+		"session_id": sessionID,
+		"title":      newTitle,
+	})
+}
+
+func sanitizeGeneratedTitle(raw string) string {
+	title := strings.TrimSpace(raw)
+	title = strings.Trim(title, `"'`)
+	title = strings.ReplaceAll(title, "\n", " ")
+	title = strings.Join(strings.Fields(title), " ")
+	if title == "" {
+		return ""
+	}
+	if len(title) > 72 {
+		title = strings.TrimSpace(title[:72])
+	}
+	return title
+}
+
+func shouldRetitleAtTurn(turn int) bool {
+	// First title after initial context; second pass once topic stabilizes.
+	return turn == 3 || turn == 8
+}
+
+func shouldReplaceSessionTitle(current, candidate string, turn int) bool {
+	current = strings.TrimSpace(current)
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return false
+	}
+	if strings.EqualFold(current, candidate) {
+		return false
+	}
+	// Always replace obvious placeholders.
+	if current == "" || strings.EqualFold(current, "new chat session") {
+		return true
+	}
+	// Replace short greeting-style titles as soon as we have enough context.
+	if turn >= 8 && isLowSignalTitle(current) {
+		return true
+	}
+	// Otherwise only replace if candidate is meaningfully richer.
+	return len(strings.Fields(candidate)) >= len(strings.Fields(current))+1
+}
+
+func isLowSignalTitle(title string) bool {
+	norm := strings.ToLower(strings.TrimSpace(title))
+	if norm == "" {
+		return true
+	}
+	if len(strings.Fields(norm)) <= 2 && len(norm) <= 14 {
+		return true
+	}
+	lowSignal := []string{
+		"hi", "hello", "hey", "hey there", "wassup", "yo", "test", "new chat", "chat",
+	}
+	for _, item := range lowSignal {
+		if norm == item {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeOutputContractType(raw string) string {

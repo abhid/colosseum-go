@@ -500,10 +500,10 @@ func browserNodeScript() string {
 	return `
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const sessionDir = process.env.BROWSER_TOOL_SESSION_DIR || '/session';
 const input = JSON.parse(process.env.BROWSER_TOOL_INPUT || '{}');
 const storagePath = path.join(sessionDir, 'storage-state.json');
-const screenshotPath = path.join(sessionDir, 'latest.png');
 const run = async () => {
   let chromium;
   try {
@@ -533,6 +533,8 @@ const run = async () => {
   const url = page.url();
   let screenshot = '';
   if (input.take_screenshot) {
+    const screenshotName = 'screenshot-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex') + '.png';
+    const screenshotPath = path.join(sessionDir, screenshotName);
     await page.screenshot({ path: screenshotPath, fullPage: true });
     screenshot = screenshotPath;
   }

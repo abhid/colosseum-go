@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { IconExternalLink } from '@tabler/icons-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { LoadingState, QueryErrorState, SectionTitle } from '../components/Common'
+import { LoadingState, QueryErrorState } from '../components/Common'
 import { api } from '../lib/api'
 import { queryKeys } from '../lib/queryKeys'
 import type { Artifact, ChatMessage } from '../lib/types'
@@ -192,6 +192,7 @@ export function ChatPage() {
     selectedSessionSummary?.latest_run_status ||
     ''
   ).toLowerCase()
+  const streamRunID = selectedSession?.latest_run_id || selectedSessionSummary?.latest_run_id || ''
   const showThinking = isAwaitingResponse || isThinkingStatus(latestRunStatus) || sendMessage.isPending
   const selectedAgentName = useMemo(() => {
     const byID = new Map((agentsQ.data ?? []).map((agent) => [agent.id, agent.name]))
@@ -218,6 +219,36 @@ export function ChatPage() {
       setIsAwaitingResponse(false)
     }
   }, [activeSession, latestRunStatus, sendMessage.isPending])
+  useEffect(() => {
+    if (!streamRunID) return
+    const es = new EventSource(`/api/stream/runs/${streamRunID}`)
+    const onRunEvent = (event: MessageEvent<string>) => {
+      let parsed: { event_type?: string; payload?: Record<string, unknown> } = {}
+      try {
+        parsed = JSON.parse(event.data) as { event_type?: string; payload?: Record<string, unknown> }
+      } catch {
+        // ignore malformed stream events
+      }
+      const eventType = String(parsed.event_type || '').trim()
+      if (!eventType) return
+      if (eventType === 'chat.session_title_updated') {
+        const eventSessionID = String(parsed.payload?.session_id || '')
+        if (!eventSessionID || eventSessionID === sessionID) {
+          qc.invalidateQueries({ queryKey: queryKeys.chatSession(sessionID) })
+          qc.invalidateQueries({ queryKey: queryKeys.chatSessions })
+        }
+        return
+      }
+      // Keep core session state fresh on run-level updates.
+      qc.invalidateQueries({ queryKey: queryKeys.chatSession(sessionID) })
+      qc.invalidateQueries({ queryKey: queryKeys.chatSessions })
+    }
+    es.addEventListener('run_event', onRunEvent as EventListener)
+    return () => {
+      es.removeEventListener('run_event', onRunEvent as EventListener)
+      es.close()
+    }
+  }, [streamRunID, sessionID, qc])
 
   const startNewChat = () => {
     setSessionID('')
@@ -297,7 +328,19 @@ export function ChatPage() {
 
   return (
     <div className="flex h-[calc(100dvh-3rem)] min-h-0 flex-col">
-      <SectionTitle title="Chat" subtitle="Session-native chat with run-level traceability and controls." />
+      <div className="mb-6 flex items-end justify-between">
+        <div>
+          <h2 className="text-xl font-semibold tracking-tight text-gray-900">Chat</h2>
+          <p className="mt-1 text-sm text-gray-500">Session-native chat with run-level traceability and controls.</p>
+        </div>
+        <button
+          type="button"
+          onClick={startNewChat}
+          className="rounded border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+        >
+          New chat
+        </button>
+      </div>
       <div className="min-h-0 flex-1">
         <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             <div className="mb-3 flex items-center justify-between border-b border-gray-200 pb-3">
@@ -307,72 +350,72 @@ export function ChatPage() {
                   {selectedSession ? `Session ${selectedSession.id}` : 'Pick an agent and send the first message to start.'}
                 </p>
               </div>
-              {activeSession ? (
-                <button
-                  type="button"
-                  onClick={startNewChat}
-                  className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
-                >
-                  New chat session
-                </button>
-              ) : null}
               {selectedSession ? (
                 <div className="flex items-center gap-2">
-                  {selectedSession.latest_run_id ? (
-                    <Link to={`/runs/${selectedSession.latest_run_id}`} className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50">
-                      Open run
-                    </Link>
-                  ) : null}
                   {isRenaming ? (
-                    <>
-                      <input
-                        className="h-7 w-40 rounded border border-gray-300 px-2 text-xs"
-                        value={renameValue}
-                        onChange={(event) => setRenameValue(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') {
-                            event.preventDefault()
-                            const next = renameValue.trim()
-                            if (!next) return
-                            patchSession.mutate({ title: next }, { onSuccess: () => setIsRenaming(false) })
-                          }
-                          if (event.key === 'Escape') {
-                            event.preventDefault()
-                            setIsRenaming(false)
-                            setRenameValue('')
-                          }
-                        }}
-                      />
-                      <button
-                        type="button"
-                        className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
-                        onClick={() => {
+                    <input
+                      className="h-7 w-44 rounded border border-gray-300 px-2 text-xs"
+                      value={renameValue}
+                      onChange={(event) => setRenameValue(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
                           const next = renameValue.trim()
                           if (!next) return
                           patchSession.mutate({ title: next }, { onSuccess: () => setIsRenaming(false) })
-                        }}
-                      >
-                        Save
-                      </button>
-                    </>
-                  ) : (
+                        }
+                        if (event.key === 'Escape') {
+                          event.preventDefault()
+                          setIsRenaming(false)
+                          setRenameValue('')
+                        }
+                      }}
+                    />
+                  ) : null}
+                  <div className="inline-flex overflow-hidden rounded-md border border-gray-300 bg-white text-xs text-gray-700">
                     <button
                       type="button"
-                      className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                      className="px-2 py-1 hover:bg-gray-50"
                       onClick={() => {
+                        if (isRenaming) {
+                          const next = renameValue.trim()
+                          if (!next) return
+                          patchSession.mutate({ title: next }, { onSuccess: () => setIsRenaming(false) })
+                          return
+                        }
                         setRenameValue(selectedSession.title)
                         setIsRenaming(true)
                       }}
                     >
-                      Rename
+                      {isRenaming ? 'Save' : 'Rename'}
                     </button>
-                  )}
-                  <button type="button" className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50" onClick={() => patchSession.mutate({ pinned: !selectedSession.pinned_at })}>
-                    {selectedSession.pinned_at ? 'Unpin' : 'Pin'}
-                  </button>
-                  <button type="button" className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50" onClick={() => patchSession.mutate({ archived: !selectedSession.archived_at })}>
-                    {selectedSession.archived_at ? 'Unarchive' : 'Archive'}
-                  </button>
+                    {isRenaming ? (
+                      <button
+                        type="button"
+                        className="border-l border-gray-300 px-2 py-1 hover:bg-gray-50"
+                        onClick={() => {
+                          setIsRenaming(false)
+                          setRenameValue('')
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="border-l border-gray-300 px-2 py-1 hover:bg-gray-50"
+                      onClick={() => patchSession.mutate({ pinned: !selectedSession.pinned_at })}
+                    >
+                      {selectedSession.pinned_at ? 'Unpin' : 'Pin'}
+                    </button>
+                    <button
+                      type="button"
+                      className="border-l border-gray-300 px-2 py-1 hover:bg-gray-50"
+                      onClick={() => patchSession.mutate({ archived: !selectedSession.archived_at })}
+                    >
+                      {selectedSession.archived_at ? 'Unarchive' : 'Archive'}
+                    </button>
+                  </div>
                 </div>
               ) : null}
             </div>

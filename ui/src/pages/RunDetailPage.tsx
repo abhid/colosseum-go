@@ -508,7 +508,7 @@ export function RunDetailPage() {
                   return (
                     <div key={ev.id} className={`group border transition-colors rounded-md px-3 py-2 ${expanded ? 'bg-white border-gray-200 shadow-sm' : 'border-transparent hover:border-gray-200 hover:bg-white hover:shadow-sm'}`}>
                       <div className="flex items-start gap-3 cursor-pointer" onClick={() => setExpandedRowID(expanded ? '' : ev.id)}>
-                        <div className="w-[68px] shrink-0 pt-0.5 text-right flex justify-end">
+                        <div className="w-[140px] shrink-0 pt-0.5 text-right flex justify-end">
                           <span className={`inline-flex items-center justify-center px-2 py-0.5 text-[10px] uppercase tracking-wide font-bold rounded shadow-sm ${getRoleColor(role)}`}>
                             {role}
                           </span>
@@ -536,7 +536,7 @@ export function RunDetailPage() {
                       
                       {/* Expanded View */}
                       {expanded && (
-                        <div className="ml-[80px] mt-3 space-y-3 p-3 bg-[#fafafa] rounded-md border border-gray-200">
+                        <div className="ml-[152px] mt-3 space-y-3 p-3 bg-[#fafafa] rounded-md border border-gray-200">
                           <div className="space-y-1">
                             <p className="text-[11px] text-gray-500">{humanizeEventType(ev.event_type)} • {new Date(ev.created_at).toLocaleString()}</p>
                             <pre className="max-h-64 overflow-auto rounded bg-gray-900 p-2 font-mono text-[11px] text-gray-100">{JSON.stringify(ev.parsed, null, 2)}</pre>
@@ -566,7 +566,7 @@ export function RunDetailPage() {
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 mb-1.5">Workspace</p>
-                      <p className="font-mono text-xs text-gray-900 bg-gray-50 p-2 rounded border border-gray-200 truncate" title={runQ.data?.workspace_path}>{runQ.data?.workspace_path || 'None'}</p>
+                      <p className="font-mono text-xs text-gray-900 bg-gray-50 p-2 rounded border border-gray-200 truncate" title={toDisplayPath(runQ.data?.workspace_path || '')}>{toDisplayPath(runQ.data?.workspace_path || '') || 'None'}</p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-500 mb-1.5">Status</p>
@@ -968,7 +968,7 @@ function StepArtifactCard({ runID, artifact }: { runID: string; artifact: Displa
             </button>
           ) : (
             <>
-              <button className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50 transition-colors" onClick={() => navigator.clipboard.writeText(artifact.path)}>
+              <button className="inline-flex items-center gap-1 rounded border border-gray-300 px-2 py-0.5 text-xs hover:bg-gray-50 transition-colors" onClick={() => navigator.clipboard.writeText(toDisplayPath(artifact.path))}>
                 <IconCopy size={12} />
                 Copy path
               </button>
@@ -979,7 +979,7 @@ function StepArtifactCard({ runID, artifact }: { runID: string; artifact: Displa
           )}
         </div>
       </div>
-      <p className="break-all font-mono text-[11px] text-gray-600 mt-1">{artifact.path}</p>
+      <p className="break-all font-mono text-[11px] text-gray-600 mt-1">{toDisplayPath(artifact.path)}</p>
       <p className="text-[11px] text-gray-500">{(artifact.size_bytes / 1024).toFixed(1)} KB</p>
       {hasInlineLog ? (
         <pre className="mt-2 max-h-36 overflow-auto rounded bg-gray-900 p-2 font-mono text-[11px] text-gray-100">{String(artifact._inline_log)}</pre>
@@ -1041,4 +1041,16 @@ function formatDuration(ms: number) {
   const h = Math.floor(m / 60)
   const remM = m % 60
   return `${h}h ${remM}m`
+}
+
+function toDisplayPath(rawPath: string) {
+  const value = String(rawPath || '').trim()
+  if (!value) return ''
+  if (value.startsWith('inline://')) return value
+  const normalized = value.replaceAll('\\', '/')
+  const artifactsIdx = normalized.lastIndexOf('/artifacts/')
+  if (artifactsIdx >= 0) return normalized.slice(artifactsIdx + 1)
+  const projectIdx = normalized.lastIndexOf('/colosseum/')
+  if (projectIdx >= 0) return normalized.slice(projectIdx + '/colosseum/'.length)
+  return normalized.replace(/^\/+/, '')
 }

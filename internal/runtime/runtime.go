@@ -268,13 +268,57 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 		m.execDB(ctx, "mark run step completed", `UPDATE run_steps SET status='completed', output_json=?, ended_at=? WHERE id=?`, string(outJSON), now(), stepID)
 		m.execDB(ctx, "mark model span completed", `UPDATE trace_spans SET status='completed', ended_at=? WHERE id=?`, now(), modelSpanID)
 		_ = m.Store.AppendEvent(ctx, runID, stepID, "model.response", map[string]any{"text": resp.Text, "tool_calls": resp.ToolCalls, "usage": resp.Usage})
-		m.appendChatMessageForRun(ctx, runID, "assistant", resp.Text, "model.response")
 
 		if len(resp.ToolCalls) == 0 {
 			if strings.TrimSpace(resp.Text) == "" {
 				continue
 			}
-			valid, contractDetail := validateOutputContract(outputContractType, outputContractPayload, resp.Text)
+			dispatchCtx, dispatchCtxErr := m.buildDispatchContext(ctx, runID)
+			if dispatchCtxErr != nil {
+				return m.failRun(ctx, runID, fmt.Errorf("build dispatch context failed: %w", dispatchCtxErr))
+			}
+			chatText, dispatchMeta := m.prepareChatAssistantText(
+				ctx,
+				provider,
+				model,
+				runID,
+				task,
+				resp.Text,
+				dispatchCtx.ProvenanceSummary,
+				dispatchCtx.Artifacts,
+			)
+			if dispatchMeta.Applied {
+				_ = m.Store.AppendEvent(ctx, runID, stepID, "response.dispatch.succeeded", map[string]any{
+					"reason":        dispatchMeta.Reason,
+					"input_length":  len(resp.Text),
+					"output_length": len(chatText),
+				})
+			} else if dispatchMeta.Error != "" {
+				_ = m.Store.AppendEvent(ctx, runID, stepID, "response.dispatch.failed", map[string]any{
+					"reason": dispatchMeta.Reason,
+					"error":  truncateForEvent(dispatchMeta.Error, 220),
+				})
+			} else if dispatchMeta.Reason != "" {
+				_ = m.Store.AppendEvent(ctx, runID, stepID, "response.dispatch.skipped", map[string]any{
+					"reason": dispatchMeta.Reason,
+				})
+			}
+			chatText = ensureAttachmentReferences(runID, chatText, resp.Text, dispatchCtx.Artifacts)
+			provenanceValid, provenanceDetail := validateProvenanceOutputContract(chatText, dispatchCtx.Media)
+			_ = m.Store.AppendEvent(ctx, runID, stepID, "output_contract.validated", map[string]any{
+				"type":    "provenance_media",
+				"passed":  provenanceValid,
+				"details": truncateForEvent(provenanceDetail, 280),
+			})
+			if !provenanceValid {
+				_ = m.Store.AppendEvent(ctx, runID, stepID, "output_contract.failed", map[string]any{
+					"type":   "provenance_media",
+					"reason": truncateForEvent(provenanceDetail, 280),
+				})
+				m.appendChatMessageForRun(ctx, runID, "system", "Output contract validation failed: "+truncateForEvent(provenanceDetail, 220), "output_contract.failed")
+				return m.failRun(ctx, runID, fmt.Errorf("output contract validation failed: %s", provenanceDetail))
+			}
+			valid, contractDetail := validateOutputContract(outputContractType, outputContractPayload, chatText)
 			_ = m.Store.AppendEvent(ctx, runID, stepID, "output_contract.validated", map[string]any{
 				"type":    normalizeContractType(outputContractType),
 				"passed":  valid,
@@ -288,10 +332,13 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 				m.appendChatMessageForRun(ctx, runID, "system", "Output contract validation failed: "+truncateForEvent(contractDetail, 220), "output_contract.failed")
 				return m.failRun(ctx, runID, fmt.Errorf("output contract validation failed: %s", contractDetail))
 			}
+			m.appendChatMessageForRun(ctx, runID, "assistant", chatText, "model.response")
 			m.execDB(ctx, "mark run completed", `UPDATE runs SET status='completed', completed_at=?, updated_at=? WHERE id=?`, now(), now(), runID)
-			_ = m.Store.AppendEvent(ctx, runID, stepID, "run.completed", map[string]any{"result": resp.Text})
+			_ = m.Store.AppendEvent(ctx, runID, stepID, "run.completed", map[string]any{"result": chatText})
 			return nil
 		}
+
+		m.appendChatMessageForRun(ctx, runID, "assistant", resp.Text, "model.response")
 
 		messages = append(messages, providers.Message{Role: "assistant", Content: resp.Text, ToolCalls: resp.ToolCalls})
 		for _, tc := range resp.ToolCalls {
@@ -567,6 +614,8 @@ func buildEffectiveSystemPrompt(base string, allowedTools []string) string {
 		"- Ground final answers in observed tool output; summarize key evidence succinctly.",
 		"- Prefer user-facing summaries over raw telemetry dumps; avoid listing raw UUIDs or artifact IDs unless the user explicitly asks for them.",
 		"- If artifacts are produced, describe what was produced in plain language and where to view it, rather than enumerating internal identifiers.",
+		"- When the task asks for media output (screenshots/images/video/audio), end with a clear attachment confirmation sentence (e.g., 'Screenshot attached below.').",
+		"- Never return internal filesystem paths (e.g., /home/... or /workspace/...) unless explicitly requested for debugging.",
 		"- If a tool attempt fails, briefly report the failure and next best attempt.",
 		"- Treat each run as a one-shot execution whenever feasible: complete the requested deliverable in this run.",
 		"- Do not ask follow-up permission questions like 'want me to continue?' after completing the requested action.",
@@ -578,7 +627,7 @@ func buildEffectiveSystemPrompt(base string, allowedTools []string) string {
 	}
 	if hasAllowedToolPrefix(allowedTools, "browser.") {
 		toolPolicy = append(toolPolicy,
-			"- browser.* tools are available: when asked for a screenshot or page capture, capture it in-run and return the resulting artifact reference instead of offering additional optional captures.")
+			"- browser.* tools are available: when asked for a screenshot or page capture, capture it in-run and confirm it is attached; avoid exposing raw artifact IDs unless requested.")
 	}
 	policyBlock := strings.Join(toolPolicy, "\n")
 	if base == "" {

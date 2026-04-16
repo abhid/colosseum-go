@@ -107,7 +107,7 @@ func registerAPIRoutes(
 		r.Get("/chat/sessions/{id}", getChatSessionHandler(db))
 		r.Patch("/chat/sessions/{id}", patchChatSessionHandler(db))
 		r.Get("/chat/sessions/{id}/messages", listChatSessionMessagesHandler(db))
-		r.Post("/chat/sessions/{id}/messages", createChatSessionMessageHandler(db, workspaceRoot))
+		r.Post("/chat/sessions/{id}/messages", createChatSessionMessageHandler(db, workspaceRoot, providerMap))
 		r.Post("/chat/sessions/{id}/attachments", uploadChatSessionAttachmentsHandler(db))
 		r.Get("/providers", providersHandler(availableProviders))
 		r.Get("/providers/openai/models", openAIModelsHandler(openAIKey))
