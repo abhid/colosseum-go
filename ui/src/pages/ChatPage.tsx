@@ -1,6 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { IconExternalLink } from '@tabler/icons-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -15,6 +15,8 @@ type ImageGalleryItem = { key: string; runID: string; artifact: Artifact; url: s
 
 export function ChatPage() {
   const qc = useQueryClient()
+  const navigate = useNavigate()
+  const { sessionID: sessionIDParam = '' } = useParams<{ sessionID?: string }>()
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
   const dragDepthRef = useRef(0)
@@ -53,6 +55,11 @@ export function ChatPage() {
   useEffect(() => {
     if (!agentID && (agentsQ.data ?? []).length > 0) setAgentID((agentsQ.data ?? [])[0].id)
   }, [agentsQ.data, agentID])
+  useEffect(() => {
+    const normalized = sessionIDParam.trim()
+    if (normalized === sessionID) return
+    setSessionID(normalized)
+  }, [sessionIDParam, sessionID])
   useEffect(() => {
     composerRef.current?.focus()
   }, [sessionID])
@@ -97,7 +104,7 @@ export function ChatPage() {
       setErrorText('')
       setMessage('')
       setPendingFiles([])
-      setSessionID(result.session_id)
+      selectSession(result.session_id)
       await Promise.all([
         qc.invalidateQueries({ queryKey: queryKeys.chatSessions }),
         qc.invalidateQueries({ queryKey: queryKeys.chatSession(result.session_id) }),
@@ -196,6 +203,11 @@ export function ChatPage() {
     const byID = new Map((agentsQ.data ?? []).map((agent) => [agent.id, agent.name]))
     return byID.get(selectedSession?.agent_id || '') || 'Agent'
   }, [agentsQ.data, selectedSession?.agent_id])
+  const selectSession = (nextSessionID: string) => {
+    const normalized = nextSessionID.trim()
+    setSessionID(normalized)
+    navigate(normalized ? `/chat/${encodeURIComponent(normalized)}` : '/chat')
+  }
 
   useEffect(() => {
     if (!activeSession) return
@@ -249,7 +261,7 @@ export function ChatPage() {
   }, [streamRunID, sessionID, qc])
 
   const startNewChat = () => {
-    setSessionID('')
+    selectSession('')
     setErrorText('')
     setMessage('')
     setPendingFiles([])
@@ -450,7 +462,7 @@ export function ChatPage() {
                           <button
                             key={session.id}
                             type="button"
-                            onClick={() => setSessionID(session.id)}
+                            onClick={() => selectSession(session.id)}
                             className="shrink-0 rounded-md border border-gray-200 bg-white px-2 py-0.5 text-left text-[11px] leading-tight text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
                             title={session.title}
                           >

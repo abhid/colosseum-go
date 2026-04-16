@@ -19,4 +19,6 @@ This documentation set is organized by operator journey:
 - [Troubleshooting](08-troubleshooting.md)
 - [Development and Contributing](09-development-contributing.md)
 - [RFC: Chat-First Assistant Roadmap](10-chat-roadmap-rfc.md)
+- [Output Contracts](11-output-contracts.md)
+- [Response and Media Pipeline](12-response-and-media-pipeline.md)
 

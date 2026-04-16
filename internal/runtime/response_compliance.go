@@ -9,6 +9,7 @@ import (
 
 type complianceArtifact struct {
 	ID   string
+	Kind string
 	MIME string
 }
 
@@ -66,7 +67,7 @@ func (m *Manager) buildDispatchContext(ctx context.Context, runID string) (dispa
 				return dispatchContext{}, scanErr
 			}
 			lowerMIME := strings.ToLower(strings.TrimSpace(mime))
-			artifacts = append(artifacts, complianceArtifact{ID: strings.TrimSpace(id), MIME: lowerMIME})
+			artifacts = append(artifacts, complianceArtifact{ID: strings.TrimSpace(id), Kind: strings.TrimSpace(kind), MIME: lowerMIME})
 			switch {
 			case strings.HasPrefix(lowerMIME, "image/"):
 				media.Images++

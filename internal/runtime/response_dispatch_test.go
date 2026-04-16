@@ -43,3 +43,24 @@ func TestParseDispatchEnvelope(t *testing.T) {
 		t.Fatalf("expected one artifact link")
 	}
 }
+
+func TestShouldDispatchAssistantResponse(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{name: "clean answer", text: "The logo is blue and white.", want: false},
+		{name: "uuid heavy", text: "artifact 123e4567-e89b-12d3-a456-426614174000 and 123e4567-e89b-12d3-a456-426614174001", want: true},
+		{name: "artifact metadata dump", text: "artifact: abc123", want: true},
+		{name: "telemetry dump", text: "input_tokens=123 output_tokens=45", want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, _ := shouldDispatchAssistantResponse(tc.text)
+			if got != tc.want {
+				t.Fatalf("expected %v, got %v", tc.want, got)
+			}
+		})
+	}
+}

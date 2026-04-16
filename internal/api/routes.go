@@ -299,7 +299,7 @@ func createAgentHandler(db *sql.DB) http.HandlerFunc {
 				id,name,description,provider,model,system_prompt,allowed_tools,starter_prompts,
 				default_task,default_max_steps,default_workspace_path,output_contract_type,output_contract_payload,created_at,updated_at
 			)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		`, id, req.Name, req.Description, req.Provider, req.Model, req.SystemPrompt, string(toolsJSON), string(starterPromptsJSON), req.DefaultTask, req.DefaultMaxSteps, req.DefaultWorkspacePath, normalizeOutputContractType(req.OutputContractType), strings.TrimSpace(req.OutputContractPayload), now, now)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

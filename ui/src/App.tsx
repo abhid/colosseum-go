@@ -19,6 +19,7 @@ function App() {
         <Route path="/" element={<Navigate to="/runs" replace />} />
         <Route path="/runs" element={<RunsPage />} />
         <Route path="/chat" element={<ChatPage />} />
+        <Route path="/chat/:sessionID" element={<ChatPage />} />
         <Route path="/runs/:id" element={<RunDetailPage />} />
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/agents/:id" element={<AgentDetailPage />} />

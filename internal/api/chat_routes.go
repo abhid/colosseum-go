@@ -570,9 +570,16 @@ func uploadFilesToRun(ctx context.Context, db *sql.DB, r *http.Request, runID st
 		}
 		attachmentMsg := buildAttachmentUserEventMessage(runID, uploaded)
 		if strings.TrimSpace(attachmentMsg) != "" {
+			attachmentIDs := make([]string, 0, len(uploaded))
+			for _, item := range uploaded {
+				if artifactID, ok := item["artifact_id"].(string); ok && strings.TrimSpace(artifactID) != "" {
+					attachmentIDs = append(attachmentIDs, strings.TrimSpace(artifactID))
+				}
+			}
 			if _, err := appendEventWithRetry(ctx, db, runID, "", "user.event", map[string]any{
-				"message": attachmentMsg,
-				"source":  "chat.attachments",
+				"message":     attachmentMsg,
+				"source":      "chat.attachments",
+				"attachments": attachmentIDs,
 			}); err != nil {
 				return nil, fmt.Errorf("failed to append attachment user event: %w", err)
 			}
@@ -600,6 +607,7 @@ func buildAttachmentUserEventMessage(runID string, uploaded []map[string]any) st
 		return ""
 	}
 	lines = append(lines, "Use these attachments as primary context when answering image/file questions.")
+	lines = append(lines, "Treat this as the latest attachment context unless the user explicitly asks to compare with earlier images.")
 	return strings.Join(lines, "\n")
 }
 

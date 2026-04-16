@@ -12,7 +12,10 @@ import (
 )
 
 var (
-	uuidPattern = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
+	uuidPattern       = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
+	artifactLinkExpr  = regexp.MustCompile(`(?i)/api/runs/[^/\s]+/artifacts/[^/\s]+/content`)
+	artifactMetaExpr  = regexp.MustCompile(`(?i)\b(artifact|evidence)\s*:`)
+	telemetryDumpExpr = regexp.MustCompile(`(?i)\b(input_tokens|output_tokens|duration_ms|step_id|run_id)\b`)
 )
 
 type dispatchMeta struct {
@@ -37,6 +40,11 @@ func (m *Manager) prepareChatAssistantText(
 	if raw == "" {
 		return raw, dispatchMeta{Reason: "empty response"}
 	}
+	shouldDispatch, reason := shouldDispatchAssistantResponse(raw)
+	if !shouldDispatch {
+		out := ensureAttachmentReferences(runID, raw, raw, artifacts)
+		return out, dispatchMeta{Reason: reason}
+	}
 	if provider == nil {
 		fallback := ensureAttachmentReferences(runID, compactInternalArtifactNoise(raw), raw, artifacts)
 		return fallback, dispatchMeta{Reason: "dispatcher provider unavailable"}
@@ -49,11 +57,31 @@ func (m *Manager) prepareChatAssistantText(
 		}
 		refined = appendAllowedArtifactLinks(runID, refined, envelope.ArtifactLinks, artifacts)
 		refined = ensureAttachmentReferences(runID, refined, raw, artifacts)
-		return refined, dispatchMeta{Applied: true, Reason: "envelope_dispatch"}
+		return refined, dispatchMeta{Applied: true, Reason: reason}
 	}
 	// Deterministic fallback if model dispatch fails.
 	fallback := ensureAttachmentReferences(runID, compactInternalArtifactNoise(raw), raw, artifacts)
-	return fallback, dispatchMeta{Applied: true, Reason: "envelope_dispatch", Error: errorString(err)}
+	return fallback, dispatchMeta{Applied: true, Reason: reason, Error: errorString(err)}
+}
+
+func shouldDispatchAssistantResponse(text string) (bool, string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return false, "empty"
+	}
+	if len(uuidPattern.FindAllString(text, -1)) >= 2 {
+		return true, "uuid_heavy"
+	}
+	if artifactLinkExpr.MatchString(text) {
+		return true, "artifact_link_rewrite"
+	}
+	if artifactMetaExpr.MatchString(text) {
+		return true, "artifact_metadata_dump"
+	}
+	if telemetryDumpExpr.MatchString(text) {
+		return true, "telemetry_dump"
+	}
+	return false, "already_user_facing"
 }
 
 func dispatchAssistantEnvelope(

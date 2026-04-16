@@ -199,10 +199,11 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 	}); err != nil {
 		return m.failRun(ctx, runID, err)
 	}
+	mediaPolicy := buildMediaInputPolicy(providerName, model)
 
 	messages := []providers.Message{{Role: "user", Content: task}}
 	lastEventSeq := 0
-	if err := m.appendPendingUserMessages(ctx, runID, &messages, &lastEventSeq); err != nil {
+	if err := m.appendPendingUserMessages(ctx, runID, &messages, &lastEventSeq, mediaPolicy); err != nil {
 		return m.failRun(ctx, runID, fmt.Errorf("load user events: %w", err))
 	}
 	var replaySourceRunID string
@@ -246,7 +247,7 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 			_ = m.Store.AppendEvent(ctx, runID, "", "run.stopped", map[string]any{"status": status})
 			return nil
 		}
-		if err := m.appendPendingUserMessages(ctx, runID, &messages, &lastEventSeq); err != nil {
+		if err := m.appendPendingUserMessages(ctx, runID, &messages, &lastEventSeq, mediaPolicy); err != nil {
 			return m.failRun(ctx, runID, fmt.Errorf("load user events: %w", err))
 		}
 		stepIdx := existingStepMax + step
@@ -276,7 +277,7 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 			// If new user events (for example, late file attachment notes) arrived during this model step,
 			// defer finalization and let the next step answer with the freshest user context.
 			msgCountBefore := len(messages)
-			if err := m.appendPendingUserMessages(ctx, runID, &messages, &lastEventSeq); err != nil {
+			if err := m.appendPendingUserMessages(ctx, runID, &messages, &lastEventSeq, mediaPolicy); err != nil {
 				return m.failRun(ctx, runID, fmt.Errorf("load user events: %w", err))
 			}
 			if len(messages) > msgCountBefore {
@@ -537,7 +538,7 @@ func (m *Manager) currentStatus(runID string) (string, error) {
 	return s, err
 }
 
-func (m *Manager) appendPendingUserMessages(ctx context.Context, runID string, messages *[]providers.Message, lastSeq *int) error {
+func (m *Manager) appendPendingUserMessages(ctx context.Context, runID string, messages *[]providers.Message, lastSeq *int, mediaPolicy mediaInputPolicy) error {
 	for {
 		events, err := m.Store.GetEvents(ctx, runID, *lastSeq, 200)
 		if err != nil {
@@ -555,11 +556,16 @@ func (m *Manager) appendPendingUserMessages(ctx context.Context, runID string, m
 			if eventType != "user.event" {
 				continue
 			}
-			msg := extractUserMessage(ev["payload"])
-			if msg == "" {
+			payloadSource := eventPayloadSource(ev["payload"])
+			userMsg, ok := m.buildUserMessageFromEventPayload(ctx, runID, ev["payload"], mediaPolicy)
+			if !ok {
 				continue
 			}
-			*messages = append(*messages, providers.Message{Role: "user", Content: msg})
+			userMsg.Source = payloadSource
+			if payloadSource == "chat.attachments" {
+				*messages = dropPriorAttachmentContextMessages(*messages)
+			}
+			*messages = append(*messages, userMsg)
 		}
 		if len(events) < 200 {
 			return nil
@@ -591,6 +597,92 @@ func extractUserMessage(payload any) string {
 	default:
 		return ""
 	}
+}
+
+func (m *Manager) buildUserMessageFromEventPayload(ctx context.Context, runID string, payload any, mediaPolicy mediaInputPolicy) (providers.Message, bool) {
+	var raw map[string]any
+	switch v := payload.(type) {
+	case json.RawMessage:
+		_ = json.Unmarshal(v, &raw)
+	case []byte:
+		_ = json.Unmarshal(v, &raw)
+	}
+	text := extractUserMessage(payload)
+	msg := providers.Message{Role: "user", Content: text}
+	if raw == nil {
+		return msg, strings.TrimSpace(text) != ""
+	}
+	idsRaw, _ := raw["attachments"].([]any)
+	if len(idsRaw) == 0 {
+		return msg, strings.TrimSpace(text) != ""
+	}
+	parts := make([]providers.ContentPart, 0, len(idsRaw)+1)
+	if strings.TrimSpace(text) != "" {
+		parts = append(parts, providers.ContentPart{Type: "text", Text: text})
+	}
+	for _, item := range idsRaw {
+		artifactID := strings.TrimSpace(fmt.Sprint(item))
+		if artifactID == "" {
+			continue
+		}
+		var path, mime string
+		if err := m.DB.QueryRowContext(ctx, `SELECT path,mime_type FROM artifacts WHERE run_id=? AND id=?`, runID, artifactID).Scan(&path, &mime); err != nil {
+			continue
+		}
+		partSlice := buildAttachmentContentParts(mediaPolicy, artifactID, path, mime)
+		if len(partSlice) == 0 {
+			continue
+		}
+		parts = append(parts, partSlice...)
+		if len(parts) >= mediaPolicy.MaxParts {
+			break
+		}
+	}
+	if len(parts) > 0 {
+		msg.ContentParts = parts
+	}
+	return msg, strings.TrimSpace(text) != "" || len(msg.ContentParts) > 0
+}
+
+func eventPayloadSource(payload any) string {
+	raw := map[string]any{}
+	switch v := payload.(type) {
+	case json.RawMessage:
+		_ = json.Unmarshal(v, &raw)
+	case []byte:
+		_ = json.Unmarshal(v, &raw)
+	}
+	return strings.ToLower(strings.TrimSpace(fmt.Sprint(raw["source"])))
+}
+
+func dropPriorAttachmentContextMessages(messages []providers.Message) []providers.Message {
+	if len(messages) == 0 {
+		return messages
+	}
+	out := make([]providers.Message, 0, len(messages))
+	for _, msg := range messages {
+		if msg.Role == "user" && isAttachmentContextUserMessage(msg) {
+			continue
+		}
+		out = append(out, msg)
+	}
+	return out
+}
+
+func isAttachmentContextUserMessage(msg providers.Message) bool {
+	if strings.ToLower(strings.TrimSpace(msg.Source)) == "chat.attachments" {
+		return true
+	}
+	content := strings.ToLower(strings.TrimSpace(msg.Content))
+	if strings.HasPrefix(content, "user attached file(s) for this run:") {
+		return true
+	}
+	for _, part := range msg.ContentParts {
+		if strings.ToLower(strings.TrimSpace(part.Type)) == "image_url" && strings.TrimSpace(part.URL) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func extractUserMessageFromJSON(raw []byte) string {

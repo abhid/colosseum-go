@@ -12,11 +12,19 @@ import (
 )
 
 type Message struct {
-	Role       string     `json:"role"`
-	Content    string     `json:"content"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	Name       string     `json:"name,omitempty"`
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	Role         string        `json:"role"`
+	Content      string        `json:"content"`
+	Source       string        `json:"source,omitempty"`
+	ContentParts []ContentPart `json:"content_parts,omitempty"`
+	ToolCallID   string        `json:"tool_call_id,omitempty"`
+	Name         string        `json:"name,omitempty"`
+	ToolCalls    []ToolCall    `json:"tool_calls,omitempty"`
+}
+
+type ContentPart struct {
+	Type string `json:"type"` // text | image_url
+	Text string `json:"text,omitempty"`
+	URL  string `json:"url,omitempty"` // data URL or remote URL
 }
 
 type Tool struct {
@@ -79,6 +87,30 @@ func (c *AnthropicClient) Complete(ctx context.Context, req CompletionRequest) (
 					"content":     m.Content,
 				}},
 			})
+			continue
+		}
+		if len(m.ContentParts) > 0 {
+			blocks := make([]map[string]any, 0, len(m.ContentParts))
+			for _, part := range m.ContentParts {
+				switch strings.ToLower(strings.TrimSpace(part.Type)) {
+				case "text":
+					if strings.TrimSpace(part.Text) == "" {
+						continue
+					}
+					blocks = append(blocks, map[string]any{"type": "text", "text": part.Text})
+				case "image_url":
+					source, ok := dataURLToAnthropicImageSource(part.URL)
+					if !ok {
+						continue
+					}
+					blocks = append(blocks, map[string]any{"type": "image", "source": source})
+				}
+			}
+			if len(blocks) == 0 {
+				messages = append(messages, map[string]any{"role": m.Role, "content": m.Content})
+			} else {
+				messages = append(messages, map[string]any{"role": m.Role, "content": blocks})
+			}
 			continue
 		}
 		messages = append(messages, map[string]any{"role": m.Role, "content": m.Content})
@@ -168,7 +200,31 @@ func (c *OpenAIClient) Complete(ctx context.Context, req CompletionRequest) (Com
 	}
 	messages := make([]map[string]any, 0, len(req.Messages))
 	for _, m := range req.Messages {
-		row := map[string]any{"role": m.Role, "content": m.Content}
+		row := map[string]any{"role": m.Role}
+		if len(m.ContentParts) > 0 {
+			parts := make([]map[string]any, 0, len(m.ContentParts))
+			for _, part := range m.ContentParts {
+				switch strings.ToLower(strings.TrimSpace(part.Type)) {
+				case "text":
+					if strings.TrimSpace(part.Text) == "" {
+						continue
+					}
+					parts = append(parts, map[string]any{"type": "text", "text": part.Text})
+				case "image_url":
+					if strings.TrimSpace(part.URL) == "" {
+						continue
+					}
+					parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]any{"url": part.URL}})
+				}
+			}
+			if len(parts) > 0 {
+				row["content"] = parts
+			} else {
+				row["content"] = m.Content
+			}
+		} else {
+			row["content"] = m.Content
+		}
 		if m.Role == "assistant" && len(m.ToolCalls) > 0 {
 			toolCalls := make([]map[string]any, 0, len(m.ToolCalls))
 			for _, tc := range m.ToolCalls {
@@ -336,4 +392,29 @@ func formatOpenAIFunctionArguments(raw json.RawMessage) string {
 		}
 	}
 	return "{}"
+}
+
+func dataURLToAnthropicImageSource(raw string) (map[string]any, bool) {
+	raw = strings.TrimSpace(raw)
+	if !strings.HasPrefix(raw, "data:") {
+		return nil, false
+	}
+	comma := strings.Index(raw, ",")
+	if comma <= 5 || comma >= len(raw)-1 {
+		return nil, false
+	}
+	meta := raw[5:comma]
+	data := raw[comma+1:]
+	if !strings.Contains(strings.ToLower(meta), ";base64") {
+		return nil, false
+	}
+	mediaType := strings.TrimSpace(strings.Split(meta, ";")[0])
+	if mediaType == "" || !strings.HasPrefix(strings.ToLower(mediaType), "image/") {
+		return nil, false
+	}
+	return map[string]any{
+		"type":       "base64",
+		"media_type": mediaType,
+		"data":       data,
+	}, true
 }
