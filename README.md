@@ -1,6 +1,6 @@
 # Colosseum
 
-Colosseum is a self-hosted runtime and operator console for tool-using AI agents.
+**A self-hosted runtime and operator control plane for tool-using AI agents.**
 
 It is built for teams that want:
 
@@ -19,6 +19,20 @@ Most "agent chat" products optimize for conversational fluency. Colosseum optimi
 - **Traceability by default**: every meaningful action is persisted.
 - **Safety gates**: policy/approval workflows for high-risk operations.
 - **Recoverability**: runs can be resumed, replayed, exported, and audited.
+
+---
+
+## Quick Demo
+
+**What a real run looks like:**
+
+1. Create an agent profile (`model + system prompt + allowed tools`).
+2. Start a chat session and send a task.
+3. Watch live run events/steps/artifacts stream in.
+4. Approve/interrupt/resume when policy gates trigger.
+5. Inspect timeline, tool calls, and artifact outputs in Run Detail.
+
+**What is unique:** Colosseum keeps the full execution graph, not just the final answer.
 
 ---
 
@@ -72,6 +86,8 @@ ANTHROPIC_API_KEY=... \
 
 Open `http://127.0.0.1:8001`.
 
+Tip: for local developer ergonomics, you can keep API keys in `.env.local`.
+
 ---
 
 ## Core Concepts
@@ -86,9 +102,9 @@ Open `http://127.0.0.1:8001`.
 
 ---
 
-## Production Behaviors Worth Calling Out
+## Production-Grade Guarantees
 
-### Dispatcher + Contracts
+### Response Pipeline + Contracts
 
 Colosseum uses a two-stage response model:
 
@@ -97,14 +113,14 @@ Colosseum uses a two-stage response model:
 
 This avoids "looks good, but wrong" responses.
 
-### Attachment and Multimodal Path
+### Attachment + Multimodal Input
 
 - Uploaded files are persisted as run artifacts.
 - Attachment events are promoted into runtime user context.
 - Media handling uses provider/model capability policy and MIME transformers.
 - Latest attachment context supersedes stale prior attachment context unless user asks for comparison.
 
-### Approval/Status Safety
+### Approval + Status Safety
 
 - Run status transitions are guarded (invalid transitions rejected).
 - Approval events are only emitted when a pending approval is actually resolved.
@@ -191,4 +207,15 @@ See [docs/09-development-contributing.md](docs/09-development-contributing.md).
 
 ## License
 
-Add your project license here before publishing publicly.
+This project is licensed under the [MIT License](LICENSE).
+
+---
+
+## Public Launch Notes
+
+Before publishing this repository publicly, double-check:
+
+- no secrets/API keys in git history
+- no private internal hostnames in docs/examples
+- provider/API usage costs and limits are documented
+- screenshots/demo assets reflect current UI

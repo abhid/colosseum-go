@@ -35,6 +35,8 @@ flowchart LR
 - persists run steps, tool calls, spans, events, and terminal status
 - supports interruption/approval/resume and steer-message continuation
 - re-queues in-flight runs after restart (`running` -> `queued`)
+- assembles multimodal attachment context from chat upload events
+- runs response synthesis + deterministic contract validation before completion
 
 ### Persistence (`internal/db`)
 
@@ -64,6 +66,7 @@ Browser tools run through a dedicated browser runtime:
 - OpenAI and Anthropic adapters
 - normalized completion response shape (`text`, `tool_calls`, `usage`)
 - retry handling at runtime layer
+- support for structured content parts (text + image payloads where supported)
 
 ### Policy Engine (`internal/policy`)
 
@@ -83,6 +86,12 @@ Browser tools run through a dedicated browser runtime:
 6. All telemetry and artifacts are persisted.
 7. Run reaches terminal state (`completed`, `failed`, `cancelled`) or gated state (`interrupted`).
 8. Operator steer event appends a user message and can re-queue terminal/interrupted runs for continuation.
+
+For chat turns, this lifecycle is augmented by:
+
+- attachment upload events promoted into runtime user context
+- conditional dispatcher rewriting for noisy outputs
+- contract checks (`provenance_media` + configured output contract) before final commit
 
 ## Reliability Model
 

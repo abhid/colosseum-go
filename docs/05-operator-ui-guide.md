@@ -4,6 +4,7 @@ This guide focuses on real operator workflows in the current UI.
 
 ## Navigation
 
+- **Chat**: session-native chat interface with run-backed history, attachments, and live progress
 - **Runs**: create runs and monitor recent status
 - **Run Detail**: full execution surface (timeline, transcript, debug, events)
 - **Agents**: reusable profiles for provider/model/system prompt/tools
@@ -20,6 +21,22 @@ Create run requires:
 - `task`
 
 Workspace is auto-managed by default. Advanced workspace controls are not shown in the default UI.
+
+## Chat Page
+
+Chat is a first-class operator surface:
+
+- each user turn creates a new run in the active chat session
+- messages are persisted in session order across runs
+- attachments are uploaded into the current run and promoted into model context
+- run-level message headers provide direct navigation to run detail
+- approval chips appear only for real approval-request events
+
+Behavior notes:
+
+- Enter sends, Shift+Enter inserts newline
+- drag/drop files on the composer to attach
+- when no chat is active, recent session picker is shown inline
 
 ## Agents Page
 
