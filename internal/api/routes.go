@@ -1130,8 +1130,17 @@ func appendRunEventHandler(db *sql.DB) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 			return
 		}
+		message := extractSteeringMessage(payload)
+		if message == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "message required"})
+			return
+		}
+		normalized := map[string]any{"message": message}
+		for key, value := range payload {
+			normalized[key] = value
+		}
 		now := time.Now().UTC().Format(time.RFC3339Nano)
-		seq, err := appendEventWithRetry(r.Context(), db, runID, "", "user.event", payload)
+		seq, err := appendEventWithRetry(r.Context(), db, runID, "", "user.event", normalized)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -1149,6 +1158,20 @@ func appendRunEventHandler(db *sql.DB) http.HandlerFunc {
 		_ = db.QueryRowContext(r.Context(), `SELECT status FROM runs WHERE id=?`, runID).Scan(&status)
 		writeJSON(w, http.StatusCreated, map[string]any{"seq": seq, "status": status})
 	}
+}
+
+func extractSteeringMessage(payload map[string]any) string {
+	for _, key := range []string{"message", "text", "content", "instruction"} {
+		value, ok := payload[key]
+		if !ok {
+			continue
+		}
+		msg := strings.TrimSpace(fmt.Sprint(value))
+		if msg != "" {
+			return msg
+		}
+	}
+	return ""
 }
 
 func providersHandler(availableProviders map[string]bool) http.HandlerFunc {

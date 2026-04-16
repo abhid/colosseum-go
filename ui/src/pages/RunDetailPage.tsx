@@ -23,7 +23,7 @@ import { queryKeys } from '../lib/queryKeys'
 
 import { formatDistanceToNow } from 'date-fns'
 
-type TabId = 'transcript' | 'debug' | 'events'
+type TabId = 'transcript' | 'debug' | 'events' | 'artifacts'
 
 type EventRow = {
   id: string
@@ -75,12 +75,32 @@ export function RunDetailPage() {
   const [activeTab, setActiveTab] = useState<TabId>('transcript')
   const [filterText] = useState('')
   const [steerText, setSteerText] = useState('')
+  const [steerError, setSteerError] = useState('')
   const [expandedRowID, setExpandedRowID] = useState('')
   const [expandedEventRowID, setExpandedEventRowID] = useState('')
   const [isArtifactsModalOpen, setIsArtifactsModalOpen] = useState(false)
   const [hoveredTimelineSpanID, setHoveredTimelineSpanID] = useState('')
 
-  const steer = useMutation({ mutationFn: () => api.steerRun(id, { message: steerText }), onSuccess: () => setSteerText('') })
+  const steer = useMutation({
+    mutationFn: (message: string) => api.steerRun(id, { message }),
+    onSuccess: () => {
+      setSteerText('')
+      setSteerError('')
+      qc.invalidateQueries({ queryKey: queryKeys.run(id) })
+      qc.invalidateQueries({ queryKey: queryKeys.telemetry(id) })
+    },
+  })
+
+  const sendSteeringMessage = async () => {
+    const message = steerText.trim()
+    if (!message) return
+    setSteerError('')
+    try {
+      await steer.mutateAsync(message)
+    } catch (err) {
+      setSteerError(err instanceof Error ? err.message : 'Failed to send message')
+    }
+  }
 
   const runQ = useQuery({ queryKey: queryKeys.run(id), queryFn: () => api.getRun(id), enabled: Boolean(id), refetchInterval: 1800 })
   const agentQ = useQuery({ queryKey: queryKeys.agent(runQ.data?.agent_id || ''), queryFn: () => api.listAgents().then(agents => agents.find(a => a.id === runQ.data?.agent_id)), enabled: Boolean(runQ.data?.agent_id) })
@@ -321,15 +341,22 @@ export function RunDetailPage() {
               placeholder="Message agent..." 
               className="h-9 min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 text-sm shadow-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400 lg:w-80 lg:flex-none"
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && steerText) {
-                  steer.mutate()
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  void sendSteeringMessage()
                 }
               }}
             />
-            <button className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50">
-            Actions
-            <IconChevronDown size={16} className="text-gray-400" />
+            <button
+              type="button"
+              className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-50"
+              onClick={() => void sendSteeringMessage()}
+              disabled={!steerText.trim() || steer.isPending}
+            >
+            {steer.isPending ? 'Sending...' : 'Send'}
+            <IconArrowUpRight size={14} className="text-gray-400" />
             </button>
+            {steerError ? <p className="w-full text-xs text-red-600">{steerError}</p> : null}
           </div>
         </div>
       </div>
@@ -385,6 +412,12 @@ export function RunDetailPage() {
               className={`pb-2 text-sm font-medium transition-colors flex items-center gap-1 ${activeTab === 'events' ? 'text-gray-900 border-b-[3px] border-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
             >
               All events <IconChevronDown size={14} />
+            </button>
+            <button
+              onClick={() => setActiveTab('artifacts')}
+              className={`pb-2 text-sm font-medium transition-colors flex items-center gap-1 ${activeTab === 'artifacts' ? 'text-gray-900 border-b-[3px] border-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              Artifacts
             </button>
             <div className="relative pb-2 group">
                <IconSearch size={16} className="text-gray-400 group-hover:text-gray-600 transition-colors cursor-pointer" />
@@ -681,6 +714,35 @@ export function RunDetailPage() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          ) : null}
+
+          {activeTab === 'artifacts' ? (
+            <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+              <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 bg-gray-50">
+                <div className="flex items-center gap-2">
+                  <IconFile size={16} className="text-gray-500" />
+                  <h3 className="text-sm font-semibold tracking-tight text-gray-900">Session Artifacts</h3>
+                </div>
+                <span className="text-xs font-semibold bg-white border border-gray-200 text-gray-700 px-2.5 py-0.5 rounded-full shadow-sm">
+                  {displayArtifacts.length}
+                </span>
+              </div>
+              <div className="p-5">
+                {displayArtifacts.length === 0 ? (
+                  <div className="text-center text-gray-500 py-10 flex flex-col items-center justify-center">
+                    <IconFile size={40} className="text-gray-300 mb-3" />
+                    <p className="text-sm font-medium text-gray-900 mb-1">No artifacts found</p>
+                    <p className="text-xs">This session has not generated files or logs yet.</p>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {displayArtifacts.map((artifact) => (
+                      <StepArtifactCard key={artifact.id} runID={id} artifact={artifact} />
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           ) : null}

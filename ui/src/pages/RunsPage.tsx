@@ -189,6 +189,9 @@ export function RunsPage() {
                     <option key={String(vault.id)} value={String(vault.id)}>{String(vault.name || vault.id)}</option>
                   ))}
                 </select>
+                <p className="mt-1 text-[11px] text-gray-500">
+                  Vault-bound secrets are exposed to the session as environment variables.
+                </p>
               </div>
             </div>
 

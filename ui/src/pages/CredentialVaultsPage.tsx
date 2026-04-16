@@ -13,6 +13,10 @@ export function CredentialVaultsPage() {
   const [selectedVaultID, setSelectedVaultID] = useState('')
   const [selectedSecretName, setSelectedSecretName] = useState('')
   const [secretAlias, setSecretAlias] = useState('')
+  const [newSecretName, setNewSecretName] = useState('')
+  const [newSecretValue, setNewSecretValue] = useState('')
+  const [secretError, setSecretError] = useState('')
+  const [vaultBindingError, setVaultBindingError] = useState('')
 
   useEffect(() => {
     const firstVaultID = String((vaults.data ?? [])[0]?.id ?? '')
@@ -34,19 +38,56 @@ export function CredentialVaultsPage() {
 
   const createVault = useMutation({
     mutationFn: () => api.createCredentialVault({ name, description }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.credentialVaults }),
+    onSuccess: () => {
+      setVaultBindingError('')
+      qc.invalidateQueries({ queryKey: queryKeys.credentialVaults })
+    },
   })
   const deleteVault = useMutation({
     mutationFn: (id: string) => api.deleteCredentialVault(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.credentialVaults }),
+    onSuccess: () => {
+      setVaultBindingError('')
+      qc.invalidateQueries({ queryKey: queryKeys.credentialVaults })
+    },
+  })
+  const createSecret = useMutation({
+    mutationFn: () => {
+      const name = newSecretName.trim()
+      const value = newSecretValue
+      if (!name) throw new Error('Secret name is required')
+      if (!value.trim()) throw new Error('Secret value is required')
+      return api.createSecret({ name, value })
+    },
+    onSuccess: () => {
+      setSecretError('')
+      setNewSecretValue('')
+      qc.invalidateQueries({ queryKey: queryKeys.secrets })
+    },
+  })
+  const deleteSecret = useMutation({
+    mutationFn: (name: string) => api.deleteSecret(name),
+    onSuccess: () => {
+      setSecretError('')
+      qc.invalidateQueries({ queryKey: queryKeys.secrets })
+      qc.invalidateQueries({ queryKey: queryKeys.credentialVaultItems(selectedVaultID) })
+    },
   })
   const addVaultItem = useMutation({
-    mutationFn: () => api.upsertCredentialVaultItem(selectedVaultID, { secret_name: selectedSecretName, alias: secretAlias }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.credentialVaultItems(selectedVaultID) }),
+    mutationFn: () => api.upsertCredentialVaultItem(selectedVaultID, { secret_name: selectedSecretName, alias: secretAlias.trim() }),
+    onSuccess: () => {
+      setVaultBindingError('')
+      setSecretAlias('')
+      qc.invalidateQueries({ queryKey: queryKeys.credentialVaultItems(selectedVaultID) })
+      qc.invalidateQueries({ queryKey: queryKeys.credentialVaults })
+    },
   })
   const deleteVaultItem = useMutation({
     mutationFn: (secretName: string) => api.deleteCredentialVaultItem(selectedVaultID, secretName),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.credentialVaultItems(selectedVaultID) }),
+    onSuccess: () => {
+      setVaultBindingError('')
+      qc.invalidateQueries({ queryKey: queryKeys.credentialVaultItems(selectedVaultID) })
+      qc.invalidateQueries({ queryKey: queryKeys.credentialVaults })
+    },
   })
 
   return (
@@ -74,6 +115,72 @@ export function CredentialVaultsPage() {
           {createVault.isPending ? 'Creating...' : 'Create Vault'}
         </button>
         {createVault.error ? <p className="mt-2 text-sm text-red-600">{String(createVault.error)}</p> : null}
+      </Card>
+
+      <Card>
+        <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Secrets</h3>
+        <p className="mb-3 text-xs text-gray-500">
+          Secrets are encrypted at rest and injected into sessions as environment variables through vault bindings.
+        </p>
+        <div className="grid gap-2 md:grid-cols-2">
+          <input
+            className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
+            value={newSecretName}
+            onChange={(e) => setNewSecretName(e.target.value)}
+            placeholder="Secret name (example: OPENAI_API_KEY)"
+          />
+          <input
+            className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
+            type="password"
+            value={newSecretValue}
+            onChange={(e) => setNewSecretValue(e.target.value)}
+            placeholder="Secret value"
+          />
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            className="h-8 rounded-md border border-gray-300 px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+            disabled={createSecret.isPending}
+            onClick={async () => {
+              setSecretError('')
+              try {
+                await createSecret.mutateAsync()
+              } catch (err) {
+                setSecretError(err instanceof Error ? err.message : 'Failed to create secret')
+              }
+            }}
+          >
+            {createSecret.isPending ? 'Saving...' : 'Save Secret'}
+          </button>
+          {createSecret.error ? <p className="text-xs text-red-600">{String(createSecret.error)}</p> : null}
+        </div>
+        {secretError ? <p className="mt-2 text-xs text-red-600">{secretError}</p> : null}
+        <QueryErrorState title="Failed to load secrets" query={secrets} />
+        <div className="mt-3 space-y-1">
+          {(secrets.data ?? []).length === 0 ? <p className="text-xs text-gray-500">No secrets yet. Add one to bind it into a vault.</p> : null}
+          {(secrets.data ?? []).map((secret) => (
+            <div key={String(secret.name)} className="flex items-center justify-between rounded border border-gray-200 bg-white px-2 py-1.5 text-xs">
+              <div className="min-w-0">
+                <p className="truncate font-medium text-gray-900">{String(secret.name)}</p>
+                <p className="text-gray-500">Updated {new Date(String(secret.updated_at || secret.created_at)).toLocaleString()}</p>
+              </div>
+              <button
+                className="rounded border border-red-200 px-2 py-0.5 font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
+                disabled={deleteSecret.isPending}
+                onClick={async () => {
+                  setSecretError('')
+                  try {
+                    await deleteSecret.mutateAsync(String(secret.name))
+                  } catch (err) {
+                    setSecretError(err instanceof Error ? err.message : 'Failed to delete secret')
+                  }
+                }}
+              >
+                Delete
+              </button>
+            </div>
+          ))}
+        </div>
       </Card>
 
       <Card>
@@ -105,7 +212,10 @@ export function CredentialVaultsPage() {
       {selectedVaultID ? (
         <Card>
           <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Vault Secret Bindings</h3>
-          <QueryErrorState title="Failed to load secrets" query={secrets} />
+          <p className="mb-2 text-xs text-gray-500">
+            Each binding becomes an env var in the session. If alias is empty, the secret name is used as the env var key.
+          </p>
+          {vaultBindingError ? <p className="mb-2 text-xs text-red-600">{vaultBindingError}</p> : null}
           <div className="grid gap-2 md:grid-cols-2">
             <select
               className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
@@ -126,7 +236,14 @@ export function CredentialVaultsPage() {
           <button
             className="mt-2 h-8 rounded-md border border-gray-300 px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
             disabled={!selectedSecretName || addVaultItem.isPending}
-            onClick={() => addVaultItem.mutate()}
+            onClick={async () => {
+              setVaultBindingError('')
+              try {
+                await addVaultItem.mutateAsync()
+              } catch (err) {
+                setVaultBindingError(err instanceof Error ? err.message : 'Failed to bind secret to vault')
+              }
+            }}
           >
             Add Secret to Vault
           </button>
@@ -142,7 +259,14 @@ export function CredentialVaultsPage() {
                 <button
                   className="rounded border border-red-200 px-2 py-0.5 font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
                   disabled={deleteVaultItem.isPending}
-                  onClick={() => deleteVaultItem.mutate(String(item.secret_name))}
+                  onClick={async () => {
+                    setVaultBindingError('')
+                    try {
+                      await deleteVaultItem.mutateAsync(String(item.secret_name))
+                    } catch (err) {
+                      setVaultBindingError(err instanceof Error ? err.message : 'Failed to remove vault binding')
+                    }
+                  }}
                 >
                   Remove
                 </button>
