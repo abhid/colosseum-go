@@ -292,7 +292,7 @@ export function AgentsPage() {
         {deleteError ? (
           <p className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{deleteError}</p>
         ) : null}
-        {!agents.isLoading && !agents.isError && (agents.data ?? []).length === 0 ? <EmptyState title="No agents" body="Create an agent profile to start sessions." /> : (
+        {!agents.isLoading && !agents.isError && (agents.data ?? []).length === 0 ? <EmptyState title="No agents" body="Create an agent profile to start runs." /> : (
           <div className="space-y-3">
             {(agents.data ?? []).map((a) => (
               <div key={a.id} className="group cursor-pointer rounded-lg border border-gray-200 p-4 transition-colors hover:border-gray-300" onClick={() => navigate(`/agents/${a.id}`)}>
@@ -415,7 +415,7 @@ export function AgentsPage() {
                               const message = err instanceof Error ? err.message : 'Failed to delete agent'
                               if (message.includes('agent has runs') || message.includes('agent has sessions')) {
                                 const force = window.confirm(
-                                  `Agent "${a.name}" has sessions.\n\nForce delete will permanently remove all session history for this agent.\n\nContinue?`,
+                                  `Agent "${a.name}" has runs.\n\nForce delete will permanently remove all run history for this agent.\n\nContinue?`,
                                 )
                                 if (!force) {
                                   setDeleteError(message)

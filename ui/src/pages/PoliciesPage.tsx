@@ -32,7 +32,7 @@ export function PoliciesPage() {
 
   return (
     <div className="space-y-4">
-      <SectionTitle title="Policies" subtitle="Define governance and safety rules for sessions." />
+      <SectionTitle title="Policies" subtitle="Define governance and safety rules for runs." />
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Create Policy</h3>
         <input

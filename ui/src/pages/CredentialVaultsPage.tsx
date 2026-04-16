@@ -120,7 +120,7 @@ export function CredentialVaultsPage() {
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Secrets</h3>
         <p className="mb-3 text-xs text-gray-500">
-          Secrets are encrypted at rest and injected into sessions as environment variables through vault bindings.
+          Secrets are encrypted at rest and injected into runs as environment variables through vault bindings.
         </p>
         <div className="grid gap-2 md:grid-cols-2">
           <input
@@ -187,7 +187,7 @@ export function CredentialVaultsPage() {
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Vaults</h3>
         {vaults.isLoading ? <LoadingState label="Loading vaults..." /> : null}
         <QueryErrorState title="Failed to load vaults" query={vaults} />
-        {!vaults.isLoading && !vaults.isError && (vaults.data ?? []).length === 0 ? <EmptyState title="No vaults" body="Create vaults to group secrets for sessions." /> : null}
+        {!vaults.isLoading && !vaults.isError && (vaults.data ?? []).length === 0 ? <EmptyState title="No vaults" body="Create vaults to group secrets for runs." /> : null}
         <div className="space-y-2">
           {(vaults.data ?? []).map((vault) => (
             <div key={String(vault.id)} className={`rounded border p-2 text-sm ${selectedVaultID === String(vault.id) ? 'border-gray-400 bg-gray-50' : 'border-gray-200'}`}>

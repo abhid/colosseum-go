@@ -45,26 +45,26 @@ export const api = {
   deleteTool: (id: string) => request<{ deleted: boolean }>(`/api/tools/${id}`, { method: 'DELETE' }),
   testTool: (id: string, body: { workspace_path: string; input: Record<string, unknown> }) =>
     request<{ ok: boolean; output: Record<string, unknown>; log: string; error?: string }>(`/api/tools/${id}/test`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
-  listRuns: () => request<Run[]>('/api/sessions'),
-  getRun: (id: string) => request<Run>(`/api/sessions/${id}`),
-  getRunTelemetry: (id: string) => request<RunTelemetry>(`/api/sessions/${id}/telemetry`),
+  listRuns: () => request<Run[]>('/api/runs'),
+  getRun: (id: string) => request<Run>(`/api/runs/${id}`),
+  getRunTelemetry: (id: string) => request<RunTelemetry>(`/api/runs/${id}/telemetry`),
   createRun: (body: { agent_id: string; task: string; workspace_path?: string; source_workspace_path?: string; replay_source_run_id?: string; replay_from_step?: number; provider?: string; model?: string; max_steps?: number; environment_id?: string; credential_vault_id?: string }) =>
-    request<{ id: string; status: string }>('/api/sessions', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
+    request<{ id: string; status: string }>('/api/runs', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
   replayRun: (id: string, body: { resume_from_step?: number; provider?: string; model?: string; max_steps?: number; environment_id?: string; credential_vault_id?: string }) =>
-    request<{ id: string; status: string }>(`/api/sessions/${id}/replay`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
-  getRunTrace: (id: string) => request<RunEvent[]>(`/api/sessions/${id}/trace`),
-  getRunArtifacts: (id: string) => request<Artifact[]>(`/api/sessions/${id}/artifacts`),
-  getRunArtifactContentURL: (runID: string, artifactID: string) => `/api/sessions/${runID}/artifacts/${artifactID}/content`,
-  cancelRun: (id: string) => request<{ status: string }>(`/api/sessions/${id}/cancel`, { method: 'POST' }),
-  approveRun: (id: string) => request<{ status: string }>(`/api/sessions/${id}/approve`, { method: 'POST' }),
-  interruptRun: (id: string) => request<{ status: string }>(`/api/sessions/${id}/interrupt`, { method: 'POST' }),
-  resumeRun: (id: string) => request<{ status: string }>(`/api/sessions/${id}/resume`, { method: 'POST' }),
+    request<{ id: string; status: string }>(`/api/runs/${id}/replay`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
+  getRunTrace: (id: string) => request<RunEvent[]>(`/api/runs/${id}/trace`),
+  getRunArtifacts: (id: string) => request<Artifact[]>(`/api/runs/${id}/artifacts`),
+  getRunArtifactContentURL: (runID: string, artifactID: string) => `/api/runs/${runID}/artifacts/${artifactID}/content`,
+  cancelRun: (id: string) => request<{ status: string }>(`/api/runs/${id}/cancel`, { method: 'POST' }),
+  approveRun: (id: string) => request<{ status: string }>(`/api/runs/${id}/approve`, { method: 'POST' }),
+  interruptRun: (id: string) => request<{ status: string }>(`/api/runs/${id}/interrupt`, { method: 'POST' }),
+  resumeRun: (id: string) => request<{ status: string }>(`/api/runs/${id}/resume`, { method: 'POST' }),
   steerRun: (id: string, payload: Record<string, unknown>) =>
-    request<{ seq: number }>(`/api/sessions/${id}/events`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(payload) }),
+    request<{ seq: number }>(`/api/runs/${id}/events`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(payload) }),
   uploadSessionFiles: async (id: string, files: File[]) => {
     const form = new FormData()
     for (const file of files) form.append('files', file, file.name)
-    const res = await fetch(`/api/sessions/${id}/files`, { method: 'POST', body: form })
+    const res = await fetch(`/api/runs/${id}/files`, { method: 'POST', body: form })
     if (!res.ok) {
       throw new Error(await parseErrorMessage(res))
     }

@@ -18,12 +18,12 @@ export function ApprovalsPage() {
 
   return (
     <div className="space-y-4">
-      <SectionTitle title="Approvals" subtitle="Review sessions waiting for operator action." />
+      <SectionTitle title="Approvals" subtitle="Review runs waiting for operator action." />
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Pending Approval Queue</h3>
         {runs.isLoading ? <LoadingState label="Loading approvals..." /> : null}
         <QueryErrorState title="Failed to load approvals" query={runs} />
-        {!runs.isLoading && !runs.isError && waiting.length === 0 ? <EmptyState title="No pending approvals" body="Interrupted sessions requiring approval appear here." /> : (
+        {!runs.isLoading && !runs.isError && waiting.length === 0 ? <EmptyState title="No pending approvals" body="Interrupted runs requiring approval appear here." /> : (
           <div className="space-y-3">
             {waiting.map((r) => (
               <div key={r.id} className="rounded-lg border border-gray-200 p-4 transition-colors hover:border-gray-300">
@@ -36,7 +36,7 @@ export function ApprovalsPage() {
                   <div className="flex items-center gap-2">
                     <StatusBadge status={r.status} />
                     <button onClick={() => approve.mutate(r.id)} className="h-8 rounded-md bg-gray-900 px-3 text-xs font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50" disabled={approve.isPending}>Approve</button>
-                    <button onClick={() => navigate(`/sessions/${r.id}`)} className="h-8 rounded-md border border-gray-300 px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50">Open</button>
+                    <button onClick={() => navigate(`/runs/${r.id}`)} className="h-8 rounded-md border border-gray-300 px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50">Open</button>
                   </div>
                 </div>
               </div>

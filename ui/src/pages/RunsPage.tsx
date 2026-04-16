@@ -34,9 +34,7 @@ export function RunsPage() {
         environment_id: form.environment_id || undefined,
         credential_vault_id: form.credential_vault_id || undefined,
       })
-      if (selectedFiles.length > 0) {
-        await api.uploadSessionFiles(created.id, selectedFiles)
-      }
+      if (selectedFiles.length > 0) await api.uploadSessionFiles(created.id, selectedFiles)
       return created
     },
     onSuccess: (res) => {
@@ -44,7 +42,7 @@ export function RunsPage() {
       setIsCreateOpen(false)
       setSelectedFiles([])
       setForm({ title: '', agent_id: '', task: '', environment_id: '', credential_vault_id: '' })
-      navigate(`/sessions/${res.id}`)
+      navigate(`/runs/${res.id}`)
     },
   })
 
@@ -69,27 +67,27 @@ export function RunsPage() {
 
   return (
     <div className="space-y-4">
-      <SectionTitle title="Sessions" subtitle="Start and monitor long-lived agent sessions." />
+      <SectionTitle title="Runs" subtitle="Start and monitor long-lived agent runs." />
       <Card>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold tracking-tight text-gray-900">Create Session</h3>
+            <h3 className="text-sm font-semibold tracking-tight text-gray-900">Create Run</h3>
             <p className="mt-1 text-xs text-gray-500">Spin up a long-lived instance of your agent in its environment.</p>
           </div>
           <button
             className="h-9 rounded-md bg-gray-900 px-4 text-sm font-medium text-white transition-colors hover:bg-gray-800"
             onClick={() => setIsCreateOpen(true)}
           >
-            New Session
+            New Run
           </button>
         </div>
       </Card>
 
       <Card>
-        <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Recent Sessions</h3>
-        {runs.isLoading ? <LoadingState label="Loading sessions..." /> : null}
-        <QueryErrorState title="Failed to load sessions" query={runs} />
-        {!runs.isLoading && !runs.isError && sortedRuns.length === 0 ? <EmptyState title="No sessions yet" body="Create your first session to start execution." /> : null}
+        <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Recent Runs</h3>
+        {runs.isLoading ? <LoadingState label="Loading runs..." /> : null}
+        <QueryErrorState title="Failed to load runs" query={runs} />
+        {!runs.isLoading && !runs.isError && sortedRuns.length === 0 ? <EmptyState title="No runs yet" body="Create your first run to start execution." /> : null}
         {sortedRuns.length > 0 ? (
           <div className="overflow-x-auto rounded-lg border border-gray-200">
             <table className="w-full text-left text-sm">
@@ -100,7 +98,7 @@ export function RunsPage() {
               </thead>
               <tbody>
                 {sortedRuns.map((run) => (
-                  <tr key={run.id} className="cursor-pointer border-b border-gray-100 transition-colors hover:bg-gray-50/80 last:border-0" onClick={() => navigate(`/sessions/${run.id}`)}>
+                  <tr key={run.id} className="cursor-pointer border-b border-gray-100 transition-colors hover:bg-gray-50/80 last:border-0" onClick={() => navigate(`/runs/${run.id}`)}>
                     <td className="px-4 py-3"><StatusBadge status={run.status} /></td>
                     <td className="px-4 py-3 text-gray-700 font-medium">{run.task.slice(0, 110)}</td>
                     <td className="px-4 py-3 text-gray-500">{run.provider}/{run.model}</td>
@@ -118,7 +116,7 @@ export function RunsPage() {
           <div role="dialog" aria-modal="true" className="w-full max-w-3xl rounded-2xl border border-gray-200 bg-white p-5 shadow-xl md:p-6">
             <div className="mb-4 flex items-start justify-between gap-4">
               <div>
-                <h3 className="text-lg font-semibold tracking-tight text-gray-900">Create session</h3>
+                <h3 className="text-lg font-semibold tracking-tight text-gray-900">Create run</h3>
                 <p className="mt-1 text-sm text-gray-500">Set up an instance of your agent in its environment.</p>
               </div>
               <button
@@ -190,7 +188,7 @@ export function RunsPage() {
                   ))}
                 </select>
                 <p className="mt-1 text-[11px] text-gray-500">
-                  Vault-bound secrets are exposed to the session as environment variables.
+                  Vault-bound secrets are exposed to the run as environment variables.
                 </p>
               </div>
             </div>
@@ -245,7 +243,7 @@ export function RunsPage() {
                 onClick={() => createRun.mutate()}
                 type="button"
               >
-                {createRun.isPending ? 'Creating...' : 'Create session'}
+                {createRun.isPending ? 'Creating...' : 'Create run'}
               </button>
             </div>
           </div>

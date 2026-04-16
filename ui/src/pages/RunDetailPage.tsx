@@ -111,7 +111,7 @@ export function RunDetailPage() {
 
   useEffect(() => {
     if (!id) return
-    const es = new EventSource(`/api/stream/sessions/${id}`)
+    const es = new EventSource(`/api/stream/runs/${id}`)
     es.addEventListener('run_event', () => {
       qc.invalidateQueries({ queryKey: queryKeys.telemetry(id) })
       qc.invalidateQueries({ queryKey: queryKeys.run(id) })
@@ -308,7 +308,7 @@ export function RunDetailPage() {
 
   if (!id) return null
 
-  const taskTitle = runQ.data?.task || 'Session Detail'
+  const taskTitle = runQ.data?.task || 'Run Detail'
   const statusLabel = runQ.data?.status || 'Unknown'
 
   return (
@@ -318,7 +318,7 @@ export function RunDetailPage() {
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="mb-1.5 flex items-center gap-2 text-sm text-gray-500">
-            <span className="hover:text-gray-700 transition-colors">Sessions</span>
+            <span className="hover:text-gray-700 transition-colors">Runs</span>
             <span className="text-gray-300">/</span>
             <span className="truncate font-medium text-gray-600 hover:text-gray-700 transition-colors">
               {id}
@@ -430,7 +430,7 @@ export function RunDetailPage() {
           </div>
         </div>
 
-        <div className={`p-6 mx-auto ${activeTab === 'transcript' ? 'max-w-6xl' : 'max-w-5xl'}`}>
+        <div className={`p-6 mx-auto ${activeTab === 'transcript' ? 'max-w-6xl' : activeTab === 'events' ? 'max-w-none' : 'max-w-5xl'}`}>
           {activeTab === 'transcript' ? (
             <>
               {/* Timeline Component */}
@@ -506,7 +506,7 @@ export function RunDetailPage() {
                   const rowArtifacts = stepArtifactsByStepID[ev.step_id] ?? []
                   
                   return (
-                    <div key={ev.id} className={`group border transition-colors rounded-md -mx-3 px-3 py-2 ${expanded ? 'bg-white border-gray-200 shadow-sm' : 'border-transparent hover:border-gray-200 hover:bg-white hover:shadow-sm'}`}>
+                    <div key={ev.id} className={`group border transition-colors rounded-md px-3 py-2 ${expanded ? 'bg-white border-gray-200 shadow-sm' : 'border-transparent hover:border-gray-200 hover:bg-white hover:shadow-sm'}`}>
                       <div className="flex items-start gap-3 cursor-pointer" onClick={() => setExpandedRowID(expanded ? '' : ev.id)}>
                         <div className="w-[68px] shrink-0 pt-0.5 text-right flex justify-end">
                           <span className={`inline-flex items-center justify-center px-2 py-0.5 text-[10px] uppercase tracking-wide font-bold rounded shadow-sm ${getRoleColor(role)}`}>
@@ -554,7 +554,7 @@ export function RunDetailPage() {
           {activeTab === 'debug' ? (
              <div className="space-y-6">
                 <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-5">
-                  <h3 className="text-sm font-semibold tracking-tight text-gray-900 mb-4">Session Details</h3>
+                  <h3 className="text-sm font-semibold tracking-tight text-gray-900 mb-4">Run Details</h3>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                     <div>
                       <p className="text-xs text-gray-500 mb-1.5">Agent ID</p>
@@ -576,7 +576,7 @@ export function RunDetailPage() {
                   <details className="text-xs group">
                     <summary className="cursor-pointer text-gray-600 hover:text-gray-900 font-medium inline-flex items-center gap-1 transition-colors">
                       <IconChevronDown size={14} className="group-open:-rotate-180 transition-transform" />
-                      View Raw Session Object
+                      View Raw Run Object
                     </summary>
                     <pre className="max-h-64 overflow-auto rounded-lg bg-gray-900 p-4 font-mono text-[11px] text-gray-100 mt-3 shadow-inner">{JSON.stringify(runQ.data, null, 2)}</pre>
                   </details>
@@ -723,7 +723,7 @@ export function RunDetailPage() {
               <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4 bg-gray-50">
                 <div className="flex items-center gap-2">
                   <IconFile size={16} className="text-gray-500" />
-                  <h3 className="text-sm font-semibold tracking-tight text-gray-900">Session Artifacts</h3>
+                  <h3 className="text-sm font-semibold tracking-tight text-gray-900">Run Artifacts</h3>
                 </div>
                 <span className="text-xs font-semibold bg-white border border-gray-200 text-gray-700 px-2.5 py-0.5 rounded-full shadow-sm">
                   {displayArtifacts.length}
@@ -755,7 +755,7 @@ export function RunDetailPage() {
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 bg-gray-50/80">
               <div className="flex items-center gap-2">
                 <IconFile size={18} className="text-gray-500" />
-                <h2 className="text-lg font-semibold text-gray-900">Session Artifacts <span className="text-gray-500 font-normal text-sm ml-1">({displayArtifacts.length})</span></h2>
+                <h2 className="text-lg font-semibold text-gray-900">Run Artifacts <span className="text-gray-500 font-normal text-sm ml-1">({displayArtifacts.length})</span></h2>
               </div>
               <button 
                 onClick={() => setIsArtifactsModalOpen(false)} 
@@ -826,16 +826,16 @@ function summarizeEvent(row: EventRow) {
   }
 
   if (row.event_type === 'run.completed') {
-    return snippet ? `Final result generated` : 'Session completed'
+    return snippet ? `Final result generated` : 'Run completed'
   }
   if (row.event_type === 'run.started') {
     const provider = typeof parsed.provider === 'string' ? parsed.provider : ''
     const model = typeof parsed.model === 'string' ? parsed.model : ''
     if (provider || model) return `Using ${provider}${provider && model ? ' ' : ''}${model}`.trim()
-    return 'Session started'
+    return 'Run started'
   }
   if (row.event_type === 'run.created') {
-    return 'Session queued'
+    return 'Run queued'
   }
 
   if (typeof parsed.reason === 'string' && parsed.reason.trim()) return parsed.reason.trim()
@@ -851,13 +851,13 @@ function transcriptLine(row: EventRow) {
   const readable = summarizeEvent(row)
   switch (row.event_type) {
     case 'run.created':
-      return { title: 'Session queued', subtitle: readable || 'Session is queued and waiting for execution.' }
+      return { title: 'Run queued', subtitle: readable || 'Run is queued and waiting for execution.' }
     case 'run.started':
-      return { title: 'Session started', subtitle: readable || 'Agent runtime has started.' }
+      return { title: 'Run started', subtitle: readable || 'Agent runtime has started.' }
     case 'run.completed':
-      return { title: 'Session completed', subtitle: readable || 'Session completed successfully.' }
+      return { title: 'Run completed', subtitle: readable || 'Run completed successfully.' }
     case 'run.failed':
-      return { title: 'Session failed', subtitle: readable || 'Session ended with an error.' }
+      return { title: 'Run failed', subtitle: readable || 'Run ended with an error.' }
     case 'model.response':
       return { title: 'Agent response', subtitle: readable || 'Model generated a response.' }
     case 'tool.result':

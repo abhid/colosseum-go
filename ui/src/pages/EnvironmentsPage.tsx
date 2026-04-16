@@ -34,7 +34,7 @@ export function EnvironmentsPage() {
 
   return (
     <div className="space-y-4">
-      <SectionTitle title="Environments" subtitle="Manage runtime profiles used by sessions." />
+      <SectionTitle title="Environments" subtitle="Manage runtime profiles used by runs." />
       <Card>
         <div className="mb-4 flex items-center gap-2">
           <h3 className="text-sm font-semibold tracking-tight text-gray-900">Create Environment</h3>
@@ -49,7 +49,7 @@ export function EnvironmentsPage() {
             <div className="pointer-events-none absolute left-0 top-7 z-10 hidden w-[360px] rounded-md border border-gray-200 bg-white p-3 text-xs text-gray-700 shadow-lg group-hover:block group-focus-within:block">
               <p className="font-semibold text-gray-900">Config JSON options</p>
               <p className="mt-1 text-gray-600">
-                Sessions currently inject only <span className="font-mono text-[11px]">env_vars</span> from this config.
+                Runs currently inject only <span className="font-mono text-[11px]">env_vars</span> from this config.
               </p>
               <pre className="mt-2 overflow-x-auto rounded bg-gray-900 p-2 font-mono text-[11px] text-gray-100">{`{
   "env_vars": {

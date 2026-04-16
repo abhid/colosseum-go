@@ -109,7 +109,7 @@ export function AgentDetailPage() {
         max_steps: form.default_max_steps,
         workspace_path: form.default_workspace_path,
       }),
-    onSuccess: (out) => navigate(`/sessions/${out.id}`),
+    onSuccess: (out) => navigate(`/runs/${out.id}`),
   })
 
   const enhancePrompt = useMutation({
@@ -192,7 +192,7 @@ export function AgentDetailPage() {
             Create agent
           </span>
           <span className="text-gray-400">Configure environment</span>
-          <span className="text-gray-400">Start session</span>
+          <span className="text-gray-400">Start run</span>
           <span className="text-gray-400">Integrate</span>
         </div>
       </div>
@@ -232,10 +232,10 @@ export function AgentDetailPage() {
           </div>
 
           <div className="mt-4 rounded-lg border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Start session</p>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Start run</p>
             <textarea
               className="h-24 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
-              placeholder="Session task"
+              placeholder="Run task"
               value={launchTask}
               onChange={(e) => setLaunchTask(e.target.value)}
             />
@@ -259,7 +259,7 @@ export function AgentDetailPage() {
               onClick={() => createRun.mutate()}
               disabled={createRun.isPending || !(launchTask || form.default_task).trim()}
             >
-              {createRun.isPending ? 'Starting...' : 'Start Session'}
+              {createRun.isPending ? 'Starting...' : 'Start Run'}
             </button>
           </div>
 
@@ -353,7 +353,7 @@ export function AgentDetailPage() {
                 className="h-24 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
                 value={form.default_task}
                 onChange={(e) => setForm((f) => ({ ...f, default_task: e.target.value }))}
-                placeholder="Default session task (used when task is blank)"
+                placeholder="Default run task (used when task is blank)"
               />
               <div className="grid gap-3 md:grid-cols-2">
                 <input
@@ -420,7 +420,7 @@ export function AgentDetailPage() {
                   const message = err instanceof Error ? err.message : 'Failed to delete agent'
                   if (message.includes('agent has runs') || message.includes('agent has sessions')) {
                     const force = window.confirm(
-                      `Agent "${form.name}" has sessions.\n\nForce delete will permanently remove all session history for this agent.\n\nContinue?`,
+                      `Agent "${form.name}" has runs.\n\nForce delete will permanently remove all run history for this agent.\n\nContinue?`,
                     )
                     if (!force) {
                       setDeleteError(message)
