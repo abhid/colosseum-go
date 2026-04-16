@@ -1,4 +1,4 @@
-import type { Agent, Artifact, ProviderInfo, Run, RunEvent, RunTelemetry, ToolDef } from './types'
+import type { Agent, Artifact, ChatMessage, ChatSession, ProviderInfo, Run, RunEvent, RunTelemetry, ToolDef } from './types'
 
 const jsonHeaders = { 'Content-Type': 'application/json' }
 
@@ -48,9 +48,9 @@ export const api = {
   listRuns: () => request<Run[]>('/api/runs'),
   getRun: (id: string) => request<Run>(`/api/runs/${id}`),
   getRunTelemetry: (id: string) => request<RunTelemetry>(`/api/runs/${id}/telemetry`),
-  createRun: (body: { agent_id: string; task: string; workspace_path?: string; source_workspace_path?: string; replay_source_run_id?: string; replay_from_step?: number; provider?: string; model?: string; max_steps?: number; environment_id?: string; credential_vault_id?: string }) =>
+  createRun: (body: { agent_id: string; task: string; workspace_path?: string; source_workspace_path?: string; replay_source_run_id?: string; replay_from_step?: number; provider?: string; model?: string; max_steps?: number; environment_id?: string; credential_vault_id?: string; output_contract_type?: string; output_contract_payload?: string }) =>
     request<{ id: string; status: string }>('/api/runs', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
-  replayRun: (id: string, body: { resume_from_step?: number; provider?: string; model?: string; max_steps?: number; environment_id?: string; credential_vault_id?: string }) =>
+  replayRun: (id: string, body: { resume_from_step?: number; provider?: string; model?: string; max_steps?: number; environment_id?: string; credential_vault_id?: string; output_contract_type?: string; output_contract_payload?: string }) =>
     request<{ id: string; status: string }>(`/api/runs/${id}/replay`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
   getRunTrace: (id: string) => request<RunEvent[]>(`/api/runs/${id}/trace`),
   getRunArtifacts: (id: string) => request<Artifact[]>(`/api/runs/${id}/artifacts`),
@@ -61,7 +61,7 @@ export const api = {
   resumeRun: (id: string) => request<{ status: string }>(`/api/runs/${id}/resume`, { method: 'POST' }),
   steerRun: (id: string, payload: Record<string, unknown>) =>
     request<{ seq: number }>(`/api/runs/${id}/events`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(payload) }),
-  uploadSessionFiles: async (id: string, files: File[]) => {
+  uploadRunFiles: async (id: string, files: File[]) => {
     const form = new FormData()
     for (const file of files) form.append('files', file, file.name)
     const res = await fetch(`/api/runs/${id}/files`, { method: 'POST', body: form })
@@ -69,6 +69,24 @@ export const api = {
       throw new Error(await parseErrorMessage(res))
     }
     return res.json() as Promise<{ uploaded: Array<Record<string, unknown>>; count: number }>
+  },
+  listChatSessions: () => request<ChatSession[]>('/api/chat/sessions'),
+  createChatSession: (body: { agent_id: string; title?: string }) =>
+    request<{ id: string; title: string; agent_id: string; status: string }>('/api/chat/sessions', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
+  getChatSession: (id: string) => request<ChatSession>(`/api/chat/sessions/${id}`),
+  patchChatSession: (id: string, body: { title?: string; archived?: boolean; pinned?: boolean }) =>
+    request<{ id: string; updated: boolean }>(`/api/chat/sessions/${id}`, { method: 'PATCH', headers: jsonHeaders, body: JSON.stringify(body) }),
+  listChatMessages: (id: string) => request<ChatMessage[]>(`/api/chat/sessions/${id}/messages`),
+  sendChatMessage: (id: string, body: { content: string; source?: string }) =>
+    request<{ session_id: string; run_id: string; turn_index: number; status: string }>(`/api/chat/sessions/${id}/messages`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
+  uploadChatAttachments: async (id: string, files: File[]) => {
+    const form = new FormData()
+    for (const file of files) form.append('files', file, file.name)
+    const res = await fetch(`/api/chat/sessions/${id}/attachments`, { method: 'POST', body: form })
+    if (!res.ok) {
+      throw new Error(await parseErrorMessage(res))
+    }
+    return res.json() as Promise<{ uploaded: Array<Record<string, unknown>>; count: number; run_id: string }>
   },
   listPolicies: () => request<Array<Record<string, unknown>>>('/api/policies'),
   createPolicy: (body: Record<string, unknown>) => request<{ id: string }>('/api/policies', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),

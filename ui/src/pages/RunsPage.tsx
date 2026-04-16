@@ -34,7 +34,7 @@ export function RunsPage() {
         environment_id: form.environment_id || undefined,
         credential_vault_id: form.credential_vault_id || undefined,
       })
-      if (selectedFiles.length > 0) await api.uploadSessionFiles(created.id, selectedFiles)
+      if (selectedFiles.length > 0) await api.uploadRunFiles(created.id, selectedFiles)
       return created
     },
     onSuccess: (res) => {

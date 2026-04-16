@@ -18,15 +18,15 @@ import (
 	"github.com/google/uuid"
 )
 
-type SessionStore interface {
+type RunEventStore interface {
 	AppendEvent(ctx context.Context, runID, stepID, eventType string, payload map[string]any) error
 	GetEvents(ctx context.Context, runID string, afterSeq, limit int) ([]map[string]any, error)
 	GetCheckpoint(ctx context.Context, runID string) (int, error)
 }
 
-type DBSessionStore struct{ DB *sql.DB }
+type DBRunEventStore struct{ DB *sql.DB }
 
-func (s *DBSessionStore) AppendEvent(ctx context.Context, runID, stepID, eventType string, payload map[string]any) error {
+func (s *DBRunEventStore) AppendEvent(ctx context.Context, runID, stepID, eventType string, payload map[string]any) error {
 	body, _ := json.Marshal(payload)
 	const maxAttempts = 3
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -54,7 +54,7 @@ func (s *DBSessionStore) AppendEvent(ctx context.Context, runID, stepID, eventTy
 	return fmt.Errorf("append event retries exceeded")
 }
 
-func (s *DBSessionStore) GetEvents(ctx context.Context, runID string, afterSeq, limit int) ([]map[string]any, error) {
+func (s *DBRunEventStore) GetEvents(ctx context.Context, runID string, afterSeq, limit int) ([]map[string]any, error) {
 	if limit <= 0 {
 		limit = 200
 	}
@@ -75,7 +75,7 @@ func (s *DBSessionStore) GetEvents(ctx context.Context, runID string, afterSeq, 
 	return out, nil
 }
 
-func (s *DBSessionStore) GetCheckpoint(ctx context.Context, runID string) (int, error) {
+func (s *DBRunEventStore) GetCheckpoint(ctx context.Context, runID string) (int, error) {
 	var max int
 	if err := s.DB.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0) FROM events WHERE run_id=?`, runID).Scan(&max); err != nil {
 		return 0, err
@@ -85,7 +85,7 @@ func (s *DBSessionStore) GetCheckpoint(ctx context.Context, runID string) (int, 
 
 type Manager struct {
 	DB        *sql.DB
-	Store     SessionStore
+	Store     RunEventStore
 	Providers map[string]providers.Client
 	Tools     *tools.Executor
 	SecretKey string
@@ -93,7 +93,7 @@ type Manager struct {
 }
 
 func NewManager(db *sql.DB, providerMap map[string]providers.Client, toolExec *tools.Executor, secretKey string) *Manager {
-	return &Manager{DB: db, Store: &DBSessionStore{DB: db}, Providers: providerMap, Tools: toolExec, SecretKey: secretKey}
+	return &Manager{DB: db, Store: &DBRunEventStore{DB: db}, Providers: providerMap, Tools: toolExec, SecretKey: secretKey}
 }
 
 func (m *Manager) Start(ctx context.Context) {
@@ -116,24 +116,24 @@ func (m *Manager) RecoverInFlight(ctx context.Context) error {
 }
 
 // Wake allows any stateless harness instance to reattach to a run.
-func (m *Manager) Wake(ctx context.Context, sessionID string) error {
+func (m *Manager) Wake(ctx context.Context, runID string) error {
 	var count int
-	if err := m.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM runs WHERE id=?`, sessionID).Scan(&count); err != nil {
+	if err := m.DB.QueryRowContext(ctx, `SELECT COUNT(1) FROM runs WHERE id=?`, runID).Scan(&count); err != nil {
 		return err
 	}
 	if count == 0 {
-		return fmt.Errorf("run not found: %s", sessionID)
+		return fmt.Errorf("run not found: %s", runID)
 	}
 	return nil
 }
 
-func (m *Manager) Interrupt(ctx context.Context, sessionID string) error {
-	_, err := m.DB.ExecContext(ctx, `UPDATE runs SET status='interrupted', updated_at=? WHERE id=?`, now(), sessionID)
+func (m *Manager) Interrupt(ctx context.Context, runID string) error {
+	_, err := m.DB.ExecContext(ctx, `UPDATE runs SET status='interrupted', updated_at=? WHERE id=?`, now(), runID)
 	return err
 }
 
-func (m *Manager) Resume(ctx context.Context, sessionID string) error {
-	_, err := m.DB.ExecContext(ctx, `UPDATE runs SET status='queued', updated_at=? WHERE id=?`, now(), sessionID)
+func (m *Manager) Resume(ctx context.Context, runID string) error {
+	_, err := m.DB.ExecContext(ctx, `UPDATE runs SET status='queued', updated_at=? WHERE id=?`, now(), runID)
 	return err
 }
 
@@ -207,7 +207,8 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 	}
 	var replaySourceRunID string
 	var replayFromStep int
-	_ = m.DB.QueryRowContext(ctx, `SELECT COALESCE(replay_source_run_id,''), COALESCE(replay_from_step,1) FROM runs WHERE id=?`, runID).Scan(&replaySourceRunID, &replayFromStep)
+	var outputContractType, outputContractPayload string
+	_ = m.DB.QueryRowContext(ctx, `SELECT COALESCE(replay_source_run_id,''), COALESCE(replay_from_step,1), COALESCE(output_contract_type,'none'), COALESCE(output_contract_payload,'') FROM runs WHERE id=?`, runID).Scan(&replaySourceRunID, &replayFromStep, &outputContractType, &outputContractPayload)
 	if replayFromStep <= 0 {
 		replayFromStep = 1
 	}
@@ -267,10 +268,25 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 		m.execDB(ctx, "mark run step completed", `UPDATE run_steps SET status='completed', output_json=?, ended_at=? WHERE id=?`, string(outJSON), now(), stepID)
 		m.execDB(ctx, "mark model span completed", `UPDATE trace_spans SET status='completed', ended_at=? WHERE id=?`, now(), modelSpanID)
 		_ = m.Store.AppendEvent(ctx, runID, stepID, "model.response", map[string]any{"text": resp.Text, "tool_calls": resp.ToolCalls, "usage": resp.Usage})
+		m.appendChatMessageForRun(ctx, runID, "assistant", resp.Text, "model.response")
 
 		if len(resp.ToolCalls) == 0 {
 			if strings.TrimSpace(resp.Text) == "" {
 				continue
+			}
+			valid, contractDetail := validateOutputContract(outputContractType, outputContractPayload, resp.Text)
+			_ = m.Store.AppendEvent(ctx, runID, stepID, "output_contract.validated", map[string]any{
+				"type":    normalizeContractType(outputContractType),
+				"passed":  valid,
+				"details": truncateForEvent(contractDetail, 280),
+			})
+			if !valid {
+				_ = m.Store.AppendEvent(ctx, runID, stepID, "output_contract.failed", map[string]any{
+					"type":   normalizeContractType(outputContractType),
+					"reason": truncateForEvent(contractDetail, 280),
+				})
+				m.appendChatMessageForRun(ctx, runID, "system", "Output contract validation failed: "+truncateForEvent(contractDetail, 220), "output_contract.failed")
+				return m.failRun(ctx, runID, fmt.Errorf("output contract validation failed: %s", contractDetail))
 			}
 			m.execDB(ctx, "mark run completed", `UPDATE runs SET status='completed', completed_at=?, updated_at=? WHERE id=?`, now(), now(), runID)
 			_ = m.Store.AppendEvent(ctx, runID, stepID, "run.completed", map[string]any{"result": resp.Text})
@@ -345,10 +361,15 @@ func (m *Manager) completeWithRetry(ctx context.Context, provider providers.Clie
 }
 
 func (m *Manager) rebuildReplayContext(ctx context.Context, runID, sourceRunID string, resumeFromStep int, task string) ([]providers.Message, int, error) {
-	msgs := []providers.Message{{Role: "user", Content: task}}
+	msgs := []providers.Message{}
+	var sourceTask string
+	_ = m.DB.QueryRowContext(ctx, `SELECT COALESCE(task,'') FROM runs WHERE id=?`, sourceRunID).Scan(&sourceTask)
+	if strings.TrimSpace(sourceTask) != "" {
+		msgs = append(msgs, providers.Message{Role: "user", Content: strings.TrimSpace(sourceTask)})
+	}
 	rows, err := m.DB.QueryContext(ctx, `
 		SELECT id,idx,output_json FROM run_steps
-		WHERE run_id=? AND step_type='model' AND status='completed' AND idx<?
+		WHERE run_id=? AND step_type IN ('model','replay') AND status='completed' AND idx<?
 		ORDER BY idx ASC
 	`, sourceRunID, resumeFromStep)
 	if err != nil {
@@ -412,6 +433,9 @@ func (m *Manager) rebuildReplayContext(ctx context.Context, runID, sourceRunID s
 			fmt.Sprintf(`{"source_run_id":"%s","source_step_id":"%s"}`, sourceRunID, stepID),
 			outputJSON, now(), now(), now())
 	}
+	if strings.TrimSpace(task) != "" {
+		msgs = append(msgs, providers.Message{Role: "user", Content: strings.TrimSpace(task)})
+	}
 	return msgs, replayed, nil
 }
 
@@ -422,6 +446,7 @@ func (m *Manager) Wait() {
 func (m *Manager) failRun(ctx context.Context, runID string, err error) error {
 	m.execDB(ctx, "mark run failed", `UPDATE runs SET status='failed', error=?, completed_at=?, updated_at=? WHERE id=?`, err.Error(), now(), now(), runID)
 	_ = m.Store.AppendEvent(ctx, runID, "", "run.failed", map[string]any{"error": err.Error()})
+	m.appendChatMessageForRun(ctx, runID, "system", "Run failed: "+truncateForEvent(err.Error(), 220), "run.failed")
 	return err
 }
 
@@ -429,6 +454,24 @@ func (m *Manager) execDB(ctx context.Context, op, query string, args ...any) {
 	if _, err := m.DB.ExecContext(ctx, query, args...); err != nil {
 		log.Printf("runtime %s failed: %v", op, err)
 	}
+}
+
+func (m *Manager) appendChatMessageForRun(ctx context.Context, runID, role, content, source string) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return
+	}
+	var sessionID string
+	var turnIndex int
+	if err := m.DB.QueryRowContext(ctx, `SELECT session_id,turn_index FROM session_runs WHERE run_id=? LIMIT 1`, runID).Scan(&sessionID, &turnIndex); err != nil {
+		return
+	}
+	nowTs := now()
+	m.execDB(ctx, "append chat message", `
+		INSERT INTO chat_messages(id,session_id,turn_index,role,content,source,run_id,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?)
+	`, uuid.NewString(), sessionID, turnIndex, role, content, source, runID, nowTs, nowTs)
+	m.execDB(ctx, "update chat session updated_at", `UPDATE chat_sessions SET updated_at=? WHERE id=?`, nowTs, sessionID)
 }
 
 func (m *Manager) currentStatus(runID string) (string, error) {
@@ -522,6 +565,8 @@ func buildEffectiveSystemPrompt(base string, allowedTools []string) string {
 		"- If a task depends on external, current, or environment-specific facts, verify using tools before concluding.",
 		"- Do not claim inability to access information when an allowed tool can fetch or verify it.",
 		"- Ground final answers in observed tool output; summarize key evidence succinctly.",
+		"- Prefer user-facing summaries over raw telemetry dumps; avoid listing raw UUIDs or artifact IDs unless the user explicitly asks for them.",
+		"- If artifacts are produced, describe what was produced in plain language and where to view it, rather than enumerating internal identifiers.",
 		"- If a tool attempt fails, briefly report the failure and next best attempt.",
 		"- Treat each run as a one-shot execution whenever feasible: complete the requested deliverable in this run.",
 		"- Do not ask follow-up permission questions like 'want me to continue?' after completing the requested action.",

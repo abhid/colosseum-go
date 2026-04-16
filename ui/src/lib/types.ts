@@ -10,6 +10,8 @@ export type Agent = {
   default_task: string
   default_max_steps: number
   default_workspace_path: string
+  output_contract_type?: 'none' | 'json_schema' | 'regex' | string
+  output_contract_payload?: string
   created_at: string
   updated_at: string
 }
@@ -25,6 +27,8 @@ export type Run = {
   max_steps: number
   environment_id: string
   credential_vault_id: string
+  output_contract_type?: 'none' | 'json_schema' | 'regex' | string
+  output_contract_payload?: string
   created_at: string
   updated_at: string
   started_at?: string
@@ -32,6 +36,32 @@ export type Run = {
   error?: string
   replay_source_run_id?: string
   replay_from_step?: number
+}
+
+export type ChatSession = {
+  id: string
+  title: string
+  agent_id: string
+  status: 'active' | 'archived' | string
+  created_at: string
+  updated_at: string
+  archived_at?: string
+  pinned_at?: string
+  latest_run_id?: string
+  latest_run_status?: string
+  latest_run_created_at?: string
+  run_count?: number
+}
+
+export type ChatMessage = {
+  id: string
+  turn_index: number
+  role: 'user' | 'assistant' | 'system' | string
+  content: string
+  source: string
+  run_id?: string
+  created_at: string
+  updated_at: string
 }
 
 export type RunEvent = {

@@ -23,30 +23,34 @@ import (
 )
 
 type createAgentRequest struct {
-	Name                 string   `json:"name"`
-	Description          string   `json:"description"`
-	Provider             string   `json:"provider"`
-	Model                string   `json:"model"`
-	SystemPrompt         string   `json:"system_prompt"`
-	AllowedTools         []string `json:"allowed_tools"`
-	StarterPrompts       []string `json:"starter_prompts"`
-	DefaultTask          string   `json:"default_task"`
-	DefaultMaxSteps      int      `json:"default_max_steps"`
-	DefaultWorkspacePath string   `json:"default_workspace_path"`
+	Name                  string   `json:"name"`
+	Description           string   `json:"description"`
+	Provider              string   `json:"provider"`
+	Model                 string   `json:"model"`
+	SystemPrompt          string   `json:"system_prompt"`
+	AllowedTools          []string `json:"allowed_tools"`
+	StarterPrompts        []string `json:"starter_prompts"`
+	DefaultTask           string   `json:"default_task"`
+	DefaultMaxSteps       int      `json:"default_max_steps"`
+	DefaultWorkspacePath  string   `json:"default_workspace_path"`
+	OutputContractType    string   `json:"output_contract_type"`
+	OutputContractPayload string   `json:"output_contract_payload"`
 }
 
 type createRunRequest struct {
-	AgentID             string `json:"agent_id"`
-	Task                string `json:"task"`
-	WorkspacePath       string `json:"workspace_path"`
-	SourceWorkspacePath string `json:"source_workspace_path"`
-	ReplaySourceRunID   string `json:"replay_source_run_id"`
-	ReplayFromStep      int    `json:"replay_from_step"`
-	Provider            string `json:"provider"`
-	Model               string `json:"model"`
-	MaxSteps            int    `json:"max_steps"`
-	EnvironmentID       string `json:"environment_id"`
-	CredentialVaultID   string `json:"credential_vault_id"`
+	AgentID               string `json:"agent_id"`
+	Task                  string `json:"task"`
+	WorkspacePath         string `json:"workspace_path"`
+	SourceWorkspacePath   string `json:"source_workspace_path"`
+	ReplaySourceRunID     string `json:"replay_source_run_id"`
+	ReplayFromStep        int    `json:"replay_from_step"`
+	Provider              string `json:"provider"`
+	Model                 string `json:"model"`
+	MaxSteps              int    `json:"max_steps"`
+	EnvironmentID         string `json:"environment_id"`
+	CredentialVaultID     string `json:"credential_vault_id"`
+	OutputContractType    string `json:"output_contract_type"`
+	OutputContractPayload string `json:"output_contract_payload"`
 }
 
 type toolUpsertRequest struct {
@@ -98,6 +102,13 @@ func registerAPIRoutes(
 		r.Post("/runs/{id}/interrupt", updateRunStatusHandler(db, "interrupted"))
 		r.Post("/runs/{id}/resume", updateRunStatusHandler(db, "queued"))
 		r.Post("/runs/{id}/events", appendRunEventHandler(db))
+		r.Get("/chat/sessions", listChatSessionsHandler(db))
+		r.Post("/chat/sessions", createChatSessionHandler(db))
+		r.Get("/chat/sessions/{id}", getChatSessionHandler(db))
+		r.Patch("/chat/sessions/{id}", patchChatSessionHandler(db))
+		r.Get("/chat/sessions/{id}/messages", listChatSessionMessagesHandler(db))
+		r.Post("/chat/sessions/{id}/messages", createChatSessionMessageHandler(db, workspaceRoot))
+		r.Post("/chat/sessions/{id}/attachments", uploadChatSessionAttachmentsHandler(db))
 		r.Get("/providers", providersHandler(availableProviders))
 		r.Get("/providers/openai/models", openAIModelsHandler(openAIKey))
 		r.Post("/prompts/enhance", enhancePromptHandler(providerMap))
@@ -274,6 +285,10 @@ func createAgentHandler(db *sql.DB) http.HandlerFunc {
 		if req.DefaultMaxSteps == 0 {
 			req.DefaultMaxSteps = 30
 		}
+		if err := validateOutputContractDefinition(req.OutputContractType, req.OutputContractPayload); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		req.StarterPrompts = normalizeStarterPrompts(req.StarterPrompts)
 		id := uuid.NewString()
 		now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -282,10 +297,10 @@ func createAgentHandler(db *sql.DB) http.HandlerFunc {
 		_, err := db.ExecContext(r.Context(), `
 			INSERT INTO agents(
 				id,name,description,provider,model,system_prompt,allowed_tools,starter_prompts,
-				default_task,default_max_steps,default_workspace_path,created_at,updated_at
+				default_task,default_max_steps,default_workspace_path,output_contract_type,output_contract_payload,created_at,updated_at
 			)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-		`, id, req.Name, req.Description, req.Provider, req.Model, req.SystemPrompt, string(toolsJSON), string(starterPromptsJSON), req.DefaultTask, req.DefaultMaxSteps, req.DefaultWorkspacePath, now, now)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		`, id, req.Name, req.Description, req.Provider, req.Model, req.SystemPrompt, string(toolsJSON), string(starterPromptsJSON), req.DefaultTask, req.DefaultMaxSteps, req.DefaultWorkspacePath, normalizeOutputContractType(req.OutputContractType), strings.TrimSpace(req.OutputContractPayload), now, now)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -297,7 +312,7 @@ func createAgentHandler(db *sql.DB) http.HandlerFunc {
 func listAgentsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rows, err := db.QueryContext(r.Context(), `
-			SELECT id,name,description,provider,model,system_prompt,allowed_tools,starter_prompts,default_task,default_max_steps,default_workspace_path,created_at,updated_at
+			SELECT id,name,description,provider,model,system_prompt,allowed_tools,starter_prompts,default_task,default_max_steps,default_workspace_path,output_contract_type,output_contract_payload,created_at,updated_at
 			FROM agents
 			ORDER BY created_at DESC
 		`)
@@ -308,9 +323,9 @@ func listAgentsHandler(db *sql.DB) http.HandlerFunc {
 		defer rows.Close()
 		out := make([]map[string]any, 0)
 		for rows.Next() {
-			var id, name, desc, provider, model, prompt, tools, starterPrompts, defaultTask, defaultWorkspacePath, createdAt, updatedAt string
+			var id, name, desc, provider, model, prompt, tools, starterPrompts, defaultTask, defaultWorkspacePath, outputContractType, outputContractPayload, createdAt, updatedAt string
 			var defaultMaxSteps int
-			if err := rows.Scan(&id, &name, &desc, &provider, &model, &prompt, &tools, &starterPrompts, &defaultTask, &defaultMaxSteps, &defaultWorkspacePath, &createdAt, &updatedAt); err != nil {
+			if err := rows.Scan(&id, &name, &desc, &provider, &model, &prompt, &tools, &starterPrompts, &defaultTask, &defaultMaxSteps, &defaultWorkspacePath, &outputContractType, &outputContractPayload, &createdAt, &updatedAt); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
@@ -318,6 +333,7 @@ func listAgentsHandler(db *sql.DB) http.HandlerFunc {
 				"id": id, "name": name, "description": desc, "provider": provider, "model": model,
 				"system_prompt": prompt, "allowed_tools": json.RawMessage(tools), "starter_prompts": json.RawMessage(starterPrompts),
 				"default_task": defaultTask, "default_max_steps": defaultMaxSteps, "default_workspace_path": defaultWorkspacePath,
+				"output_contract_type": outputContractType, "output_contract_payload": outputContractPayload,
 				"created_at": createdAt, "updated_at": updatedAt,
 			})
 		}
@@ -344,15 +360,19 @@ func updateAgentHandler(db *sql.DB) http.HandlerFunc {
 		if req.DefaultMaxSteps == 0 {
 			req.DefaultMaxSteps = 30
 		}
+		if err := validateOutputContractDefinition(req.OutputContractType, req.OutputContractPayload); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		req.StarterPrompts = normalizeStarterPrompts(req.StarterPrompts)
 		toolsJSON, _ := json.Marshal(req.AllowedTools)
 		starterPromptsJSON, _ := json.Marshal(req.StarterPrompts)
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		res, err := db.ExecContext(r.Context(), `
 			UPDATE agents
-			SET name=?, description=?, provider=?, model=?, system_prompt=?, allowed_tools=?, starter_prompts=?, default_task=?, default_max_steps=?, default_workspace_path=?, updated_at=?
+			SET name=?, description=?, provider=?, model=?, system_prompt=?, allowed_tools=?, starter_prompts=?, default_task=?, default_max_steps=?, default_workspace_path=?, output_contract_type=?, output_contract_payload=?, updated_at=?
 			WHERE id=?
-		`, req.Name, req.Description, req.Provider, req.Model, req.SystemPrompt, string(toolsJSON), string(starterPromptsJSON), req.DefaultTask, req.DefaultMaxSteps, req.DefaultWorkspacePath, now, agentID)
+		`, req.Name, req.Description, req.Provider, req.Model, req.SystemPrompt, string(toolsJSON), string(starterPromptsJSON), req.DefaultTask, req.DefaultMaxSteps, req.DefaultWorkspacePath, normalizeOutputContractType(req.OutputContractType), strings.TrimSpace(req.OutputContractPayload), now, agentID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -436,6 +456,8 @@ func deleteRunsForAgent(ctx context.Context, db *sql.DB, agentID string) (int64,
 	}()
 
 	deleteStatements := []string{
+		`DELETE FROM chat_messages WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
+		`DELETE FROM session_runs WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
 		`DELETE FROM approvals WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
 		`DELETE FROM containers WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
 		`DELETE FROM artifacts WHERE run_id IN (SELECT id FROM runs WHERE agent_id=?)`,
@@ -605,13 +627,13 @@ func createRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 		if req.ReplayFromStep <= 0 {
 			req.ReplayFromStep = 1
 		}
-		var defaultProvider, defaultModel, defaultTask, defaultWorkspacePath string
+		var defaultProvider, defaultModel, defaultTask, defaultWorkspacePath, defaultOutputContractType, defaultOutputContractPayload string
 		var defaultMaxSteps int
 		err := db.QueryRowContext(
 			r.Context(),
-			`SELECT provider, model, default_task, default_max_steps, default_workspace_path FROM agents WHERE id=?`,
+			`SELECT provider, model, default_task, default_max_steps, default_workspace_path, output_contract_type, output_contract_payload FROM agents WHERE id=?`,
 			req.AgentID,
-		).Scan(&defaultProvider, &defaultModel, &defaultTask, &defaultMaxSteps, &defaultWorkspacePath)
+		).Scan(&defaultProvider, &defaultModel, &defaultTask, &defaultMaxSteps, &defaultWorkspacePath, &defaultOutputContractType, &defaultOutputContractPayload)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "agent not found"})
 			return
@@ -638,6 +660,14 @@ func createRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 		}
 		if req.MaxSteps <= 0 {
 			req.MaxSteps = 30
+		}
+		if strings.TrimSpace(req.OutputContractType) == "" {
+			req.OutputContractType = defaultOutputContractType
+			req.OutputContractPayload = defaultOutputContractPayload
+		}
+		if err := validateOutputContractDefinition(req.OutputContractType, req.OutputContractPayload); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
 		}
 		if err := validateEnvironmentID(r.Context(), db, req.EnvironmentID); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -695,9 +725,9 @@ func createRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 			}
 		}
 		_, err = db.ExecContext(r.Context(), `
-			INSERT INTO runs(id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,environment_id,credential_vault_id,created_at,updated_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-		`, id, req.AgentID, "queued", req.Task, workspacePath, req.Provider, req.Model, req.MaxSteps, req.ReplaySourceRunID, req.ReplayFromStep, req.EnvironmentID, req.CredentialVaultID, now, now)
+			INSERT INTO runs(id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,environment_id,credential_vault_id,output_contract_type,output_contract_payload,created_at,updated_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		`, id, req.AgentID, "queued", req.Task, workspacePath, req.Provider, req.Model, req.MaxSteps, req.ReplaySourceRunID, req.ReplayFromStep, req.EnvironmentID, req.CredentialVaultID, normalizeOutputContractType(req.OutputContractType), strings.TrimSpace(req.OutputContractPayload), now, now)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -773,12 +803,14 @@ func replayRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sourceRunID := chi.URLParam(r, "id")
 		var req struct {
-			ResumeFromStep int    `json:"resume_from_step"`
-			Provider       string `json:"provider"`
-			Model          string `json:"model"`
-			MaxSteps       int    `json:"max_steps"`
-			EnvironmentID  string `json:"environment_id"`
-			VaultID        string `json:"credential_vault_id"`
+			ResumeFromStep        int    `json:"resume_from_step"`
+			Provider              string `json:"provider"`
+			Model                 string `json:"model"`
+			MaxSteps              int    `json:"max_steps"`
+			EnvironmentID         string `json:"environment_id"`
+			VaultID               string `json:"credential_vault_id"`
+			OutputContractType    string `json:"output_contract_type"`
+			OutputContractPayload string `json:"output_contract_payload"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
@@ -788,17 +820,19 @@ func replayRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 			req.ResumeFromStep = 1
 		}
 		var src struct {
-			AgentID       string
-			Task          string
-			WorkspacePath string
-			Provider      string
-			Model         string
-			MaxSteps      int
-			EnvironmentID string
-			VaultID       string
+			AgentID               string
+			Task                  string
+			WorkspacePath         string
+			Provider              string
+			Model                 string
+			MaxSteps              int
+			EnvironmentID         string
+			VaultID               string
+			OutputContractType    string
+			OutputContractPayload string
 		}
-		err := db.QueryRowContext(r.Context(), `SELECT agent_id,task,workspace_path,provider,model,max_steps,environment_id,credential_vault_id FROM runs WHERE id=?`, sourceRunID).
-			Scan(&src.AgentID, &src.Task, &src.WorkspacePath, &src.Provider, &src.Model, &src.MaxSteps, &src.EnvironmentID, &src.VaultID)
+		err := db.QueryRowContext(r.Context(), `SELECT agent_id,task,workspace_path,provider,model,max_steps,environment_id,credential_vault_id,output_contract_type,output_contract_payload FROM runs WHERE id=?`, sourceRunID).
+			Scan(&src.AgentID, &src.Task, &src.WorkspacePath, &src.Provider, &src.Model, &src.MaxSteps, &src.EnvironmentID, &src.VaultID, &src.OutputContractType, &src.OutputContractPayload)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "source run not found"})
 			return
@@ -824,6 +858,14 @@ func replayRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 		}
 		if req.VaultID == "" {
 			req.VaultID = src.VaultID
+		}
+		if strings.TrimSpace(req.OutputContractType) == "" {
+			req.OutputContractType = src.OutputContractType
+			req.OutputContractPayload = src.OutputContractPayload
+		}
+		if err := validateOutputContractDefinition(req.OutputContractType, req.OutputContractPayload); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
 		}
 		if err := validateEnvironmentID(r.Context(), db, req.EnvironmentID); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -853,9 +895,9 @@ func replayRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 			}
 		}
 		_, err = db.ExecContext(r.Context(), `
-			INSERT INTO runs(id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,environment_id,credential_vault_id,created_at,updated_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-		`, id, src.AgentID, "queued", src.Task, workspacePath, req.Provider, req.Model, req.MaxSteps, sourceRunID, req.ResumeFromStep, req.EnvironmentID, req.VaultID, now, now)
+			INSERT INTO runs(id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,environment_id,credential_vault_id,output_contract_type,output_contract_payload,created_at,updated_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		`, id, src.AgentID, "queued", src.Task, workspacePath, req.Provider, req.Model, req.MaxSteps, sourceRunID, req.ResumeFromStep, req.EnvironmentID, req.VaultID, normalizeOutputContractType(req.OutputContractType), strings.TrimSpace(req.OutputContractPayload), now, now)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -874,7 +916,7 @@ func replayRunHandler(db *sql.DB, workspaceRoot string) http.HandlerFunc {
 
 func listRunsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		rows, err := db.QueryContext(r.Context(), `SELECT id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,environment_id,credential_vault_id,created_at,updated_at,started_at,completed_at,error FROM runs ORDER BY created_at DESC`)
+		rows, err := db.QueryContext(r.Context(), `SELECT id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,environment_id,credential_vault_id,output_contract_type,output_contract_payload,created_at,updated_at,started_at,completed_at,error FROM runs ORDER BY created_at DESC`)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -882,10 +924,10 @@ func listRunsHandler(db *sql.DB) http.HandlerFunc {
 		defer rows.Close()
 		out := make([]map[string]any, 0)
 		for rows.Next() {
-			var id, agentID, status, task, ws, provider, model, createdAt, updatedAt, runErr, replaySource, environmentID, vaultID string
+			var id, agentID, status, task, ws, provider, model, createdAt, updatedAt, runErr, replaySource, environmentID, vaultID, outputContractType, outputContractPayload string
 			var startedAt, completedAt sql.NullString
 			var maxSteps, replayFromStep int
-			if err := rows.Scan(&id, &agentID, &status, &task, &ws, &provider, &model, &maxSteps, &replaySource, &replayFromStep, &environmentID, &vaultID, &createdAt, &updatedAt, &startedAt, &completedAt, &runErr); err != nil {
+			if err := rows.Scan(&id, &agentID, &status, &task, &ws, &provider, &model, &maxSteps, &replaySource, &replayFromStep, &environmentID, &vaultID, &outputContractType, &outputContractPayload, &createdAt, &updatedAt, &startedAt, &completedAt, &runErr); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
@@ -894,6 +936,7 @@ func listRunsHandler(db *sql.DB) http.HandlerFunc {
 				"provider": provider, "model": model, "max_steps": maxSteps,
 				"replay_source_run_id": replaySource, "replay_from_step": replayFromStep,
 				"environment_id": environmentID, "credential_vault_id": vaultID,
+				"output_contract_type": outputContractType, "output_contract_payload": outputContractPayload,
 				"created_at": createdAt, "updated_at": updatedAt, "started_at": startedAt.String, "completed_at": completedAt.String, "error": runErr,
 			})
 		}
@@ -904,11 +947,11 @@ func listRunsHandler(db *sql.DB) http.HandlerFunc {
 func getRunHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID := chi.URLParam(r, "id")
-		var id, agentID, status, task, ws, provider, model, createdAt, updatedAt, runErr, replaySource, environmentID, vaultID string
+		var id, agentID, status, task, ws, provider, model, createdAt, updatedAt, runErr, replaySource, environmentID, vaultID, outputContractType, outputContractPayload string
 		var startedAt, completedAt sql.NullString
 		var maxSteps, replayFromStep int
-		err := db.QueryRowContext(r.Context(), `SELECT id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,environment_id,credential_vault_id,created_at,updated_at,started_at,completed_at,error FROM runs WHERE id=?`, runID).
-			Scan(&id, &agentID, &status, &task, &ws, &provider, &model, &maxSteps, &replaySource, &replayFromStep, &environmentID, &vaultID, &createdAt, &updatedAt, &startedAt, &completedAt, &runErr)
+		err := db.QueryRowContext(r.Context(), `SELECT id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,environment_id,credential_vault_id,output_contract_type,output_contract_payload,created_at,updated_at,started_at,completed_at,error FROM runs WHERE id=?`, runID).
+			Scan(&id, &agentID, &status, &task, &ws, &provider, &model, &maxSteps, &replaySource, &replayFromStep, &environmentID, &vaultID, &outputContractType, &outputContractPayload, &createdAt, &updatedAt, &startedAt, &completedAt, &runErr)
 		if errors.Is(err, sql.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
 			return
@@ -922,6 +965,7 @@ func getRunHandler(db *sql.DB) http.HandlerFunc {
 			"provider": provider, "model": model, "max_steps": maxSteps,
 			"replay_source_run_id": replaySource, "replay_from_step": replayFromStep,
 			"environment_id": environmentID, "credential_vault_id": vaultID,
+			"output_contract_type": outputContractType, "output_contract_payload": outputContractPayload,
 			"created_at": createdAt, "updated_at": updatedAt, "started_at": startedAt, "completed_at": completedAt, "error": runErr,
 		})
 	}
@@ -1811,7 +1855,7 @@ func uploadRunFilesHandler(db *sql.DB) http.HandlerFunc {
 		var runStatus string
 		err := db.QueryRowContext(r.Context(), `SELECT workspace_path,status FROM runs WHERE id=?`, runID).Scan(&workspacePath, &runStatus)
 		if errors.Is(err, sql.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "session not found"})
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
 			return
 		}
 		if err != nil {
@@ -1820,7 +1864,7 @@ func uploadRunFilesHandler(db *sql.DB) http.HandlerFunc {
 		}
 		switch runStatus {
 		case "completed", "failed", "cancelled":
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "session is closed; cannot upload files"})
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "run is closed; cannot upload files"})
 			return
 		}
 
@@ -1879,7 +1923,7 @@ func uploadRunFilesHandler(db *sql.DB) http.HandlerFunc {
 			})
 		}
 		if len(uploaded) > 0 {
-			if _, err := appendEventWithRetry(r.Context(), db, runID, "", "session.files_uploaded", map[string]any{"count": len(uploaded), "files": uploaded}); err != nil {
+			if _, err := appendEventWithRetry(r.Context(), db, runID, "", "run.files_uploaded", map[string]any{"count": len(uploaded), "files": uploaded}); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to append upload event: " + err.Error()})
 				return
 			}

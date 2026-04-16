@@ -18,4 +18,5 @@ This documentation set is organized by operator journey:
 - [Security and Reliability](07-security-reliability.md)
 - [Troubleshooting](08-troubleshooting.md)
 - [Development and Contributing](09-development-contributing.md)
+- [RFC: Chat-First Assistant Roadmap](10-chat-roadmap-rfc.md)
 
