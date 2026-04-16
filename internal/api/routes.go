@@ -1111,15 +1111,30 @@ func getRunArtifactContentHandler(db *sql.DB) http.HandlerFunc {
 func updateRunStatusHandler(db *sql.DB, status string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID := chi.URLParam(r, "id")
+		var currentStatus string
+		if err := db.QueryRowContext(r.Context(), `SELECT status FROM runs WHERE id=?`, runID).Scan(&currentStatus); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if !canTransitionRunStatus(currentStatus, status) {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": fmt.Sprintf("invalid run status transition: %s -> %s", currentStatus, status),
+			})
+			return
+		}
 		now := time.Now().UTC().Format(time.RFC3339Nano)
-		res, err := db.ExecContext(r.Context(), `UPDATE runs SET status=?, updated_at=? WHERE id=?`, status, now, runID)
+		res, err := db.ExecContext(r.Context(), `UPDATE runs SET status=?, updated_at=? WHERE id=? AND status=?`, status, now, runID, currentStatus)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
 		affected, _ := res.RowsAffected()
 		if affected == 0 {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "run status changed concurrently; retry"})
 			return
 		}
 		if _, err := appendEventWithRetry(r.Context(), db, runID, "", "run.status", map[string]any{"status": status}); err != nil {
@@ -1134,11 +1149,36 @@ func approveLatestHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID := chi.URLParam(r, "id")
 		now := time.Now().UTC().Format(time.RFC3339Nano)
-		if _, err := db.ExecContext(r.Context(), `UPDATE approvals SET status='approved', decided_at=?, decided_by='operator' WHERE run_id=? AND status='pending'`, now, runID); err != nil {
+		tx, err := db.BeginTx(r.Context(), nil)
+		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		if _, err := db.ExecContext(r.Context(), `UPDATE runs SET status='queued', updated_at=? WHERE id=? AND status='interrupted'`, now, runID); err != nil {
+		resApproval, err := tx.ExecContext(r.Context(), `UPDATE approvals SET status='approved', decided_at=?, decided_by='operator' WHERE run_id=? AND status='pending'`, now, runID)
+		if err != nil {
+			_ = tx.Rollback()
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		approvalAffected, _ := resApproval.RowsAffected()
+		if approvalAffected == 0 {
+			_ = tx.Rollback()
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "no pending approvals for this run"})
+			return
+		}
+		resRun, err := tx.ExecContext(r.Context(), `UPDATE runs SET status='queued', updated_at=? WHERE id=? AND status='interrupted'`, now, runID)
+		if err != nil {
+			_ = tx.Rollback()
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		runAffected, _ := resRun.RowsAffected()
+		if runAffected == 0 {
+			_ = tx.Rollback()
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "run is not interrupted"})
+			return
+		}
+		if err := tx.Commit(); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
@@ -1147,6 +1187,21 @@ func approveLatestHandler(db *sql.DB) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "approved"})
+	}
+}
+
+func canTransitionRunStatus(from, to string) bool {
+	from = strings.TrimSpace(strings.ToLower(from))
+	to = strings.TrimSpace(strings.ToLower(to))
+	switch to {
+	case "queued":
+		return from == "interrupted"
+	case "interrupted":
+		return from == "queued" || from == "running"
+	case "cancelled":
+		return from == "queued" || from == "running" || from == "interrupted"
+	default:
+		return false
 	}
 }
 

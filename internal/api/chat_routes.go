@@ -549,25 +549,58 @@ func uploadFilesToRun(ctx context.Context, db *sql.DB, r *http.Request, runID st
 		if copyErr != nil {
 			return nil, errors.New("failed to copy uploaded file")
 		}
+		artifactID := uuid.NewString()
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO artifacts(id,run_id,step_id,kind,path,mime_type,size_bytes,created_at)
 			VALUES(?,?,?,?,?,?,?,?)
-		`, uuid.NewString(), runID, "", "uploaded_file", dstPath, fileHeader.Header.Get("Content-Type"), written, nowTs); err != nil {
+		`, artifactID, runID, "", "uploaded_file", dstPath, fileHeader.Header.Get("Content-Type"), written, nowTs); err != nil {
 			return nil, errors.New("failed to register uploaded artifact")
 		}
 		relPath := strings.TrimPrefix(strings.ReplaceAll(dstPath, filepath.Clean(workspacePath), ""), string(filepath.Separator))
 		uploaded = append(uploaded, map[string]any{
-			"name":       baseName,
-			"path":       relPath,
-			"size_bytes": written,
+			"artifact_id": artifactID,
+			"name":        baseName,
+			"path":        relPath,
+			"size_bytes":  written,
 		})
 	}
 	if len(uploaded) > 0 {
 		if _, err := appendEventWithRetry(ctx, db, runID, "", "run.files_uploaded", map[string]any{"count": len(uploaded), "files": uploaded}); err != nil {
 			return nil, fmt.Errorf("failed to append upload event: %w", err)
 		}
+		attachmentMsg := buildAttachmentUserEventMessage(runID, uploaded)
+		if strings.TrimSpace(attachmentMsg) != "" {
+			if _, err := appendEventWithRetry(ctx, db, runID, "", "user.event", map[string]any{
+				"message": attachmentMsg,
+				"source":  "chat.attachments",
+			}); err != nil {
+				return nil, fmt.Errorf("failed to append attachment user event: %w", err)
+			}
+		}
 	}
 	return uploaded, nil
+}
+
+func buildAttachmentUserEventMessage(runID string, uploaded []map[string]any) string {
+	if strings.TrimSpace(runID) == "" || len(uploaded) == 0 {
+		return ""
+	}
+	lines := []string{"User attached file(s) for this run:"}
+	for _, item := range uploaded {
+		name, _ := item["name"].(string)
+		artifactID, _ := item["artifact_id"].(string)
+		name = strings.TrimSpace(name)
+		artifactID = strings.TrimSpace(artifactID)
+		if name == "" || artifactID == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("- [%s](/api/runs/%s/artifacts/%s/content)", name, runID, artifactID))
+	}
+	if len(lines) <= 1 {
+		return ""
+	}
+	lines = append(lines, "Use these attachments as primary context when answering image/file questions.")
+	return strings.Join(lines, "\n")
 }
 
 func truncateChatTitle(content string) string {

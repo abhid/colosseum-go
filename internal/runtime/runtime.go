@@ -273,6 +273,18 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 			if strings.TrimSpace(resp.Text) == "" {
 				continue
 			}
+			// If new user events (for example, late file attachment notes) arrived during this model step,
+			// defer finalization and let the next step answer with the freshest user context.
+			msgCountBefore := len(messages)
+			if err := m.appendPendingUserMessages(ctx, runID, &messages, &lastEventSeq); err != nil {
+				return m.failRun(ctx, runID, fmt.Errorf("load user events: %w", err))
+			}
+			if len(messages) > msgCountBefore {
+				_ = m.Store.AppendEvent(ctx, runID, stepID, "run.deferred_for_user_event", map[string]any{
+					"new_user_messages": len(messages) - msgCountBefore,
+				})
+				continue
+			}
 			dispatchCtx, dispatchCtxErr := m.buildDispatchContext(ctx, runID)
 			if dispatchCtxErr != nil {
 				return m.failRun(ctx, runID, fmt.Errorf("build dispatch context failed: %w", dispatchCtxErr))
@@ -315,7 +327,6 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 					"type":   "provenance_media",
 					"reason": truncateForEvent(provenanceDetail, 280),
 				})
-				m.appendChatMessageForRun(ctx, runID, "system", "Output contract validation failed: "+truncateForEvent(provenanceDetail, 220), "output_contract.failed")
 				return m.failRun(ctx, runID, fmt.Errorf("output contract validation failed: %s", provenanceDetail))
 			}
 			valid, contractDetail := validateOutputContract(outputContractType, outputContractPayload, chatText)
@@ -329,7 +340,6 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 					"type":   normalizeContractType(outputContractType),
 					"reason": truncateForEvent(contractDetail, 280),
 				})
-				m.appendChatMessageForRun(ctx, runID, "system", "Output contract validation failed: "+truncateForEvent(contractDetail, 220), "output_contract.failed")
 				return m.failRun(ctx, runID, fmt.Errorf("output contract validation failed: %s", contractDetail))
 			}
 			m.appendChatMessageForRun(ctx, runID, "assistant", chatText, "model.response")

@@ -125,9 +125,7 @@ export function ChatPage() {
   })
 
   const runAction = useMutation({
-    mutationFn: async (payload: { runID: string; action: 'interrupt' | 'resume' | 'approve' }) => {
-      if (payload.action === 'interrupt') return api.interruptRun(payload.runID)
-      if (payload.action === 'resume') return api.resumeRun(payload.runID)
+    mutationFn: async (payload: { runID: string; action: 'approve' }) => {
       return api.approveRun(payload.runID)
     },
     onSuccess: async () => {
@@ -347,7 +345,9 @@ export function ChatPage() {
               <div>
                 <p className="text-sm font-semibold text-gray-900">{selectedSession?.title || 'New Chat Session'}</p>
                 <p className="text-xs text-gray-500">
-                  {selectedSession ? `Session ${selectedSession.id}` : 'Pick an agent and send the first message to start.'}
+                  {selectedSession
+                    ? `${selectedSession.run_count || 0} run${(selectedSession.run_count || 0) === 1 ? '' : 's'} in this chat session`
+                    : 'Pick an agent and send the first message to start.'}
                 </p>
               </div>
               {selectedSession ? (
@@ -455,9 +455,6 @@ export function ChatPage() {
                             title={session.title}
                           >
                             <p className="max-w-[220px] truncate font-medium">{session.title}</p>
-                            <p className="text-[10px] leading-tight text-gray-500">
-                              {session.run_count || 0} run{(session.run_count || 0) === 1 ? '' : 's'}
-                            </p>
                           </button>
                         ))}
                         {filteredSessions.length === 0 ? (
@@ -534,12 +531,15 @@ export function ChatPage() {
                           </div>
                         )
                       })()}
-                      {msg.role === 'system' && msg.run_id ? (
+                      {msg.role === 'system' && msg.run_id && isApprovalMessage(msg) ? (
                         <div className="mt-2 flex items-center gap-1">
-                          <button type="button" className="rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] text-amber-900 hover:bg-amber-100" onClick={() => runAction.mutate({ runID: msg.run_id!, action: 'approve' })}>Approve</button>
-                          <button type="button" className="rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] text-amber-900 hover:bg-amber-100" onClick={() => runAction.mutate({ runID: msg.run_id!, action: 'resume' })}>Resume</button>
-                          <button type="button" className="rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] text-amber-900 hover:bg-amber-100" onClick={() => runAction.mutate({ runID: msg.run_id!, action: 'interrupt' })}>Interrupt</button>
-                          <Link to={`/runs/${msg.run_id}`} className="rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] text-amber-900 hover:bg-amber-100">Open run</Link>
+                          <button
+                            type="button"
+                            className="rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] text-amber-900 hover:bg-amber-100"
+                            onClick={() => runAction.mutate({ runID: msg.run_id!, action: 'approve' })}
+                          >
+                            Approve
+                          </button>
                         </div>
                       ) : null}
                     </div>
@@ -581,7 +581,7 @@ export function ChatPage() {
                     ))}
                   </select>
                 ) : null}
-                <p className="text-xs text-gray-500">Drop files into the composer to attach. Slash commands: `/approve`, `/resume`, `/interrupt`, `/open-run`</p>
+                <p className="text-xs text-gray-500">Drop files into the composer to attach.</p>
               </div>
               {pendingFiles.length > 0 ? (
                 <div className="mb-2 flex flex-wrap gap-1">
@@ -748,6 +748,14 @@ function isThinkingStatus(status: string): boolean {
   const normalized = status.trim().toLowerCase()
   return normalized === 'queued' || normalized === 'running'
 }
+
+function isApprovalMessage(msg: UiMessage): boolean {
+  const src = String(msg.source || '').trim().toLowerCase()
+  if (src === 'approval.requested') return true
+  const content = String(msg.content || '').toLowerCase()
+  return content.includes('approval') && content.includes('requested')
+}
+
 
 function resolveReferencedArtifacts(
   text: string,

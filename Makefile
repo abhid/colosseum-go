@@ -1,6 +1,6 @@
 BINARY=colosseum
 
-.PHONY: build test test-go test-ui lint lint-go lint-ui check run ui-install ui-build dev tidy
+.PHONY: build test test-go test-ui lint lint-go lint-ui check run ui-install ui-build dev tidy clean
 
 build: ui-build
 	go build -o bin/$(BINARY) ./cmd/colosseum
@@ -40,3 +40,8 @@ dev:
 
 tidy:
 	go mod tidy
+
+clean:
+	rm -rf bin artifacts build tmp-artifacts workspaces userfiles
+	rm -rf ui/dist internal/api/ui/dist
+	rm -f *.db *.db-*

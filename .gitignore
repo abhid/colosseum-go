@@ -6,3 +6,4 @@ ui/dist/
 internal/api/ui/dist/
 build/
 internal/api/ui/dist/index.html
+workspaces/
