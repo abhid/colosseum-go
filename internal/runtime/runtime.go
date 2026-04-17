@@ -253,7 +253,8 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 		stepIdx := existingStepMax + step
 		stepID := uuid.NewString()
 		modelSpanID := uuid.NewString()
-		if _, err := m.DB.ExecContext(ctx, `INSERT INTO run_steps(id,run_id,idx,step_type,status,input_json,created_at,started_at) VALUES(?,?,?,?,?,?,?,?)`, stepID, runID, stepIdx, "model", "running", `{"message_count":`+fmt.Sprintf("%d", len(messages))+`}`, now(), now()); err != nil {
+		inputJSON := buildLLMRequestSnapshotJSON(model, systemPrompt, messages, providerTools)
+		if _, err := m.DB.ExecContext(ctx, `INSERT INTO run_steps(id,run_id,idx,step_type,status,input_json,created_at,started_at) VALUES(?,?,?,?,?,?,?,?)`, stepID, runID, stepIdx, "model", "running", inputJSON, now(), now()); err != nil {
 			return m.failRun(ctx, runID, err)
 		}
 		m.execDB(ctx, "insert model trace span", `INSERT INTO trace_spans(id,run_id,parent_id,name,kind,status,started_at,attrs_json) VALUES(?,?,?,?,?,?,?,?)`, modelSpanID, runID, "", "model.step", "model", "running", now(), `{"step_id":"`+stepID+`"}`)
@@ -416,6 +417,86 @@ func (m *Manager) completeWithRetry(ctx context.Context, provider providers.Clie
 		}
 	}
 	return providers.CompletionResponse{}, lastErr
+}
+
+func buildLLMRequestSnapshotJSON(model, systemPrompt string, messages []providers.Message, tools []providers.Tool) string {
+	type messageSummary struct {
+		Role               string   `json:"role"`
+		Name               string   `json:"name,omitempty"`
+		ToolCallID         string   `json:"tool_call_id,omitempty"`
+		ContentPreview     string   `json:"content_preview,omitempty"`
+		ContentLength      int      `json:"content_length,omitempty"`
+		ContentParts       int      `json:"content_parts,omitempty"`
+		ContentPartTypes   []string `json:"content_part_types,omitempty"`
+		ContentPartPreview []string `json:"content_part_preview,omitempty"`
+	}
+	payload := map[string]any{
+		"model":               model,
+		"system_prompt":       truncateForEvent(systemPrompt, 1800),
+		"system_prompt_len":   len(systemPrompt),
+		"message_count":       len(messages),
+		"tool_count":          len(tools),
+		"tool_names":          toolNames(tools),
+		"message_role_counts": map[string]int{},
+	}
+	summaries := make([]messageSummary, 0, len(messages))
+	roleCounts := map[string]int{}
+	for _, msg := range messages {
+		role := strings.TrimSpace(msg.Role)
+		if role == "" {
+			role = "unknown"
+		}
+		roleCounts[role]++
+		summary := messageSummary{
+			Role:           role,
+			Name:           msg.Name,
+			ToolCallID:     msg.ToolCallID,
+			ContentPreview: truncateForEvent(msg.Content, 420),
+			ContentLength:  len(msg.Content),
+			ContentParts:   len(msg.ContentParts),
+		}
+		for _, part := range msg.ContentParts {
+			partType := strings.TrimSpace(part.Type)
+			if partType == "" {
+				partType = "unknown"
+			}
+			summary.ContentPartTypes = append(summary.ContentPartTypes, partType)
+			switch strings.ToLower(partType) {
+			case "text":
+				if snippet := truncateForEvent(part.Text, 220); snippet != "" {
+					summary.ContentPartPreview = append(summary.ContentPartPreview, snippet)
+				}
+			case "image_url":
+				if snippet := truncateForEvent(part.URL, 220); snippet != "" {
+					summary.ContentPartPreview = append(summary.ContentPartPreview, snippet)
+				}
+			}
+		}
+		summaries = append(summaries, summary)
+	}
+	payload["messages"] = summaries
+	payload["message_role_counts"] = roleCounts
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		fallback, _ := json.Marshal(map[string]any{"message_count": len(messages), "tool_count": len(tools)})
+		return string(fallback)
+	}
+	return string(encoded)
+}
+
+func toolNames(tools []providers.Tool) []string {
+	if len(tools) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(tools))
+	for _, t := range tools {
+		name := strings.TrimSpace(t.Name)
+		if name == "" {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
 }
 
 func (m *Manager) rebuildReplayContext(ctx context.Context, runID, sourceRunID string, resumeFromStep int, task string) ([]providers.Message, int, error) {

@@ -42,6 +42,28 @@ type DisplayArtifact = Artifact & {
   _order?: number
 }
 
+type LLMRequestMessageSummary = {
+  role?: string
+  name?: string
+  tool_call_id?: string
+  content_preview?: string
+  content_length?: number
+  content_parts?: number
+  content_part_types?: string[]
+  content_part_preview?: string[]
+}
+
+type LLMRequestSnapshot = {
+  model?: string
+  system_prompt?: string
+  system_prompt_len?: number
+  message_count?: number
+  tool_count?: number
+  tool_names?: string[]
+  message_role_counts?: Record<string, number>
+  messages?: LLMRequestMessageSummary[]
+}
+
 type ActorLaneId = 'orchestrator' | 'tools' | 'system' | 'user'
 const activeActors: ActorLaneId[] = ['orchestrator', 'tools', 'system', 'user']
 
@@ -305,6 +327,43 @@ export function RunDetailPage() {
     const match = (vaultsQ.data ?? []).find((vault) => String(vault.id) === vaultID)
     return String(match?.name || vaultID)
   }, [runQ.data?.credential_vault_id, vaultsQ.data])
+  const llmRequestRows = useMemo(() => {
+    return (telemetry?.steps ?? [])
+      .filter((step) => step.step_type === 'model')
+      .map((step) => {
+        const input = parseJSONStringRecord(step.input_json)
+        const output = parseJSONStringRecord(step.output_json)
+        const request = input as LLMRequestSnapshot
+        const usage = output?.usage && typeof output.usage === 'object'
+          ? (output.usage as Record<string, unknown>)
+          : null
+        const inputTokens = usage ? Number(usage.input_tokens || 0) : 0
+        const outputTokens = usage ? Number(usage.output_tokens || 0) : 0
+        const roleCounts = request.message_role_counts && typeof request.message_role_counts === 'object'
+          ? request.message_role_counts
+          : {}
+        return {
+          stepID: step.id,
+          idx: step.idx,
+          status: step.status,
+          model: String(request.model || runQ.data?.model || '-'),
+          messageCount: Number(request.message_count || 0),
+          systemPromptLength: Number(request.system_prompt_len || 0),
+          toolCount: Number(request.tool_count || 0),
+          toolNames: Array.isArray(request.tool_names) ? request.tool_names.filter(Boolean) : [],
+          userMessages: Number(roleCounts.user || 0),
+          assistantMessages: Number(roleCounts.assistant || 0),
+          toolMessages: Number(roleCounts.tool || 0),
+          systemMessages: Number(roleCounts.system || 0),
+          inputTokens,
+          outputTokens,
+          inputRaw: step.input_json || '',
+          outputRaw: step.output_json || '',
+          messagePreviewRows: Array.isArray(request.messages) ? request.messages.slice(-3) : [],
+        }
+      })
+      .sort((a, b) => a.idx - b.idx)
+  }, [telemetry?.steps, runQ.data?.model])
 
   if (!id) return null
 
@@ -580,6 +639,87 @@ export function RunDetailPage() {
                     </summary>
                     <pre className="max-h-64 overflow-auto rounded-lg bg-gray-900 p-4 font-mono text-[11px] text-gray-100 mt-3 shadow-inner">{JSON.stringify(runQ.data, null, 2)}</pre>
                   </details>
+                </div>
+
+                <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                  <div className="px-5 py-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold tracking-tight text-gray-900">LLM Requests</h3>
+                    <span className="text-xs font-semibold bg-white border border-gray-200 text-gray-700 px-2.5 py-0.5 rounded-full shadow-sm">{llmRequestRows.length}</span>
+                  </div>
+                  <div className="p-5 space-y-3">
+                    {llmRequestRows.length === 0 ? (
+                      <p className="text-sm text-gray-500">No model request snapshots yet.</p>
+                    ) : llmRequestRows.map((row) => (
+                      <details key={row.stepID} className="group rounded-md border border-gray-200 bg-white p-3">
+                        <summary className="cursor-pointer list-none">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-700">
+                                Step {row.idx}
+                              </span>
+                              <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-mono text-gray-700">
+                                {row.model}
+                              </span>
+                              <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
+                                {row.messageCount} msgs
+                              </span>
+                              <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
+                                {row.toolCount} tools
+                              </span>
+                              <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
+                                system {row.systemPromptLength} chars
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 text-[11px] text-gray-500">
+                              {row.inputTokens > 0 || row.outputTokens > 0 ? (
+                                <span className="font-mono">{row.inputTokens} in / {row.outputTokens} out</span>
+                              ) : null}
+                              <IconChevronDown size={14} className="transition-transform group-open:rotate-180" />
+                            </div>
+                          </div>
+                        </summary>
+                        <div className="mt-3 space-y-3 border-t border-gray-100 pt-3">
+                          <div className="flex flex-wrap gap-2 text-[11px] text-gray-600">
+                            <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5">user {row.userMessages}</span>
+                            <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5">assistant {row.assistantMessages}</span>
+                            <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5">tool {row.toolMessages}</span>
+                            <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5">system {row.systemMessages}</span>
+                          </div>
+                          {row.toolNames.length > 0 ? (
+                            <p className="text-[11px] text-gray-600">
+                              <span className="font-medium text-gray-700">Tools enabled:</span> {row.toolNames.join(', ')}
+                            </p>
+                          ) : null}
+                          {row.messagePreviewRows.length > 0 ? (
+                            <div className="space-y-2">
+                              <p className="text-xs font-medium text-gray-700">Last messages sent</p>
+                              {row.messagePreviewRows.map((msg, idx) => (
+                                <div key={`${row.stepID}-${idx}`} className="rounded border border-gray-200 bg-gray-50 p-2">
+                                  <p className="text-[11px] font-medium text-gray-700">
+                                    {msg.role || 'unknown'}
+                                    {msg.name ? ` • ${msg.name}` : ''}
+                                    {msg.content_length ? ` • ${msg.content_length} chars` : ''}
+                                  </p>
+                                  {msg.content_preview ? (
+                                    <p className="mt-1 text-[11px] text-gray-600 break-words">{msg.content_preview}</p>
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                          <details>
+                            <summary className="cursor-pointer text-xs font-medium text-gray-600 hover:text-gray-900">
+                              View raw request/response JSON
+                            </summary>
+                            <div className="mt-2 grid gap-2 lg:grid-cols-2">
+                              <pre className="max-h-64 overflow-auto rounded bg-gray-900 p-2 font-mono text-[11px] text-gray-100">{prettyJSON(row.inputRaw)}</pre>
+                              <pre className="max-h-64 overflow-auto rounded bg-gray-900 p-2 font-mono text-[11px] text-gray-100">{prettyJSON(row.outputRaw)}</pre>
+                            </div>
+                          </details>
+                        </div>
+                      </details>
+                    ))}
+                  </div>
                 </div>
                 
                 <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
@@ -1004,6 +1144,23 @@ function actorFromSpan(span: TraceSpan): ActorLaneId {
   if (span.kind === 'tool' || span.name.startsWith('tool.')) return 'tools'
   if (span.kind === 'model' || span.name.startsWith('model')) return 'orchestrator'
   return 'system'
+}
+
+function parseJSONStringRecord(value: string) {
+  if (!value || typeof value !== 'string') return null
+  try {
+    const parsed = JSON.parse(value)
+    if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>
+    return null
+  } catch {
+    return null
+  }
+}
+
+function prettyJSON(value: string) {
+  const parsed = parseJSONStringRecord(value)
+  if (parsed) return JSON.stringify(parsed, null, 2)
+  return value || '{}'
 }
 
 function parseTimeMs(value?: string) {
