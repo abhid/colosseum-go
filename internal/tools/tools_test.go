@@ -2,11 +2,16 @@ package tools
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	_ "modernc.org/sqlite"
 )
 
 func TestJSONQuery(t *testing.T) {
@@ -117,6 +122,123 @@ func TestRewriteDockerSessionPath(t *testing.T) {
 	noEscape := rewriteDockerSessionPath("/session/../secrets.txt", base)
 	if !strings.HasPrefix(noEscape, base) {
 		t.Fatalf("expected rewritten path to stay under session dir, got %q", noEscape)
+	}
+}
+
+type captureSink struct {
+	runID, stepID, eventType string
+	payload                  map[string]any
+	count                    int
+}
+
+func (c *captureSink) AppendEvent(_ context.Context, runID, stepID, eventType string, payload map[string]any) error {
+	c.runID = runID
+	c.stepID = stepID
+	c.eventType = eventType
+	c.payload = payload
+	c.count++
+	return nil
+}
+
+func setupRecallDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file::memory:?cache=shared")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	stmts := []string{
+		`CREATE TABLE runs(id TEXT PRIMARY KEY, task TEXT, workspace_path TEXT, created_at TEXT)`,
+		`CREATE TABLE chat_sessions(id TEXT PRIMARY KEY, title TEXT, created_at TEXT)`,
+		`CREATE TABLE session_runs(session_id TEXT, run_id TEXT, turn_index INTEGER, created_at TEXT, PRIMARY KEY(session_id,run_id))`,
+		`CREATE TABLE artifacts(id TEXT PRIMARY KEY, run_id TEXT, step_id TEXT, kind TEXT, path TEXT, mime_type TEXT, size_bytes INTEGER, created_at TEXT)`,
+	}
+	for _, s := range stmts {
+		if _, err := db.Exec(s); err != nil {
+			t.Fatalf("setup schema: %v", err)
+		}
+	}
+	return db
+}
+
+func TestRecallArtifactAcrossSessionRuns(t *testing.T) {
+	tmp := t.TempDir()
+	screenshotPath := filepath.Join(tmp, "screenshot.png")
+	if err := os.WriteFile(screenshotPath, []byte("\x89PNGfake"), 0o644); err != nil {
+		t.Fatalf("write screenshot: %v", err)
+	}
+	db := setupRecallDB(t)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	sessionID := uuid.NewString()
+	priorRun := uuid.NewString()
+	currentRun := uuid.NewString()
+	priorArtifact := uuid.NewString()
+	if _, err := db.Exec(`INSERT INTO chat_sessions(id,title,created_at) VALUES(?,?,?)`, sessionID, "t", now); err != nil {
+		t.Fatal(err)
+	}
+	for _, rid := range []string{priorRun, currentRun} {
+		if _, err := db.Exec(`INSERT INTO runs(id,task,workspace_path,created_at) VALUES(?,?,?,?)`, rid, "t", tmp, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO session_runs(session_id,run_id,turn_index,created_at) VALUES(?,?,?,?),(?,?,?,?)`,
+		sessionID, priorRun, 1, now, sessionID, currentRun, 2, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO artifacts(id,run_id,step_id,kind,path,mime_type,size_bytes,created_at) VALUES(?,?,?,?,?,?,?,?)`,
+		priorArtifact, priorRun, "", "screenshot", screenshotPath, "image/png", int64(8), now); err != nil {
+		t.Fatal(err)
+	}
+
+	sink := &captureSink{}
+	exec := &Executor{DB: db, ArtifactsDir: tmp, EventSink: sink}
+	res, err := exec.recallArtifact(context.Background(), Context{
+		RunID: currentRun, Workspace: tmp,
+	}, json.RawMessage(`{"artifact_id":"`+priorArtifact+`","note":"recall for OCR"}`))
+	if err != nil {
+		t.Fatalf("recallArtifact error: %v", err)
+	}
+	if ok, _ := res.Output["ok"].(bool); !ok {
+		t.Fatalf("expected ok=true, got %v", res.Output)
+	}
+	newID, _ := res.Output["artifact_id"].(string)
+	if strings.TrimSpace(newID) == "" {
+		t.Fatalf("expected new artifact_id in output")
+	}
+	if newID == priorArtifact {
+		t.Fatalf("expected a fresh artifact id bound to current run, got the prior id")
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(1) FROM artifacts WHERE run_id=? AND path=?`, currentRun, screenshotPath).Scan(&count); err != nil {
+		t.Fatalf("count artifacts: %v", err)
+	}
+	if count == 0 {
+		t.Fatalf("expected new artifact row under current run")
+	}
+
+	if sink.count != 1 || sink.eventType != "user.event" {
+		t.Fatalf("expected one user.event appended, got count=%d type=%q", sink.count, sink.eventType)
+	}
+	atts, _ := sink.payload["attachments"].([]string)
+	if len(atts) != 1 || atts[0] != newID {
+		t.Fatalf("expected attachments=[%s], got %v", newID, sink.payload["attachments"])
+	}
+	if src, _ := sink.payload["source"].(string); src != "tool.recall_artifact" {
+		t.Fatalf("expected source tool.recall_artifact, got %q", src)
+	}
+}
+
+func TestRecallArtifactRequiresMatch(t *testing.T) {
+	db := setupRecallDB(t)
+	exec := &Executor{DB: db, EventSink: &captureSink{}}
+	if _, err := exec.recallArtifact(context.Background(), Context{RunID: "missing", Workspace: t.TempDir()},
+		json.RawMessage(`{"artifact_id":"does-not-exist"}`)); err == nil {
+		t.Fatalf("expected error for unknown artifact")
+	}
+	if _, err := exec.recallArtifact(context.Background(), Context{RunID: "r", Workspace: t.TempDir()},
+		json.RawMessage(`{}`)); err == nil {
+		t.Fatalf("expected error when no identifier provided")
 	}
 }
 

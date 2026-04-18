@@ -93,7 +93,11 @@ type Manager struct {
 }
 
 func NewManager(db *sql.DB, providerMap map[string]providers.Client, toolExec *tools.Executor, secretKey string) *Manager {
-	return &Manager{DB: db, Store: &DBRunEventStore{DB: db}, Providers: providerMap, Tools: toolExec, SecretKey: secretKey}
+	store := &DBRunEventStore{DB: db}
+	if toolExec != nil && toolExec.EventSink == nil {
+		toolExec.EventSink = store
+	}
+	return &Manager{DB: db, Store: store, Providers: providerMap, Tools: toolExec, SecretKey: secretKey}
 }
 
 func (m *Manager) Start(ctx context.Context) {
@@ -213,7 +217,16 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 	if replayFromStep <= 0 {
 		replayFromStep = 1
 	}
-	if replaySourceRunID != "" {
+	if packed, ok := m.buildChatSessionContext(ctx, runID, task, workspace); ok {
+		messages = packed.Messages
+		// Re-apply any user.events that arrived before the run started,
+		// so attachments uploaded just before sending still get inlined.
+		lastEventSeq = 0
+		if err := m.appendPendingUserMessages(ctx, runID, &messages, &lastEventSeq, mediaPolicy); err != nil {
+			return m.failRun(ctx, runID, fmt.Errorf("load user events: %w", err))
+		}
+		_ = m.Store.AppendEvent(ctx, runID, "", "session.context_packed", packed.PackSummary)
+	} else if replaySourceRunID != "" {
 		var replayed int
 		var replayErr error
 		messages, replayed, replayErr = m.rebuildReplayContext(ctx, runID, replaySourceRunID, replayFromStep, task)
@@ -347,6 +360,7 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 			m.appendChatMessageForRun(ctx, runID, "assistant", chatText, "model.response")
 			m.execDB(ctx, "mark run completed", `UPDATE runs SET status='completed', completed_at=?, updated_at=? WHERE id=?`, now(), now(), runID)
 			_ = m.Store.AppendEvent(ctx, runID, stepID, "run.completed", map[string]any{"result": chatText})
+			m.recordChatTurnSummary(ctx, runID, task, chatText)
 			return nil
 		}
 

@@ -38,6 +38,14 @@ type Executor struct {
 	ArtifactsDir string
 	Docker       DockerExecutor
 	Browser      *BrowserRuntime
+	EventSink    EventSink
+}
+
+// EventSink lets tools append events (notably synthetic user.event records
+// for tool-driven attachment recall) through the same transactional, retry-
+// safe path the runtime uses. Provided by the runtime Manager at wiring time.
+type EventSink interface {
+	AppendEvent(ctx context.Context, runID, stepID, eventType string, payload map[string]any) error
 }
 
 type DockerExecutor interface {
@@ -82,6 +90,7 @@ func Builtins() []Definition {
 		{Name: "test.run", Description: "Run test command in workspace", Schema: rawSchema(`{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
 		{Name: "artifact.list", Description: "List artifacts generated for run", Schema: rawSchema(`{"type":"object","properties":{}}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
 		{Name: "artifact.get", Description: "Get artifact metadata by id", Schema: rawSchema(`{"type":"object","properties":{"artifact_id":{"type":"string"}},"required":["artifact_id"]}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
+		{Name: "recall_artifact", Description: "Re-attach an image or file from an earlier turn of this chat session so the next model step can see it. Accepts artifact_id or a workspace-relative path.", Schema: rawSchema(`{"type":"object","properties":{"artifact_id":{"type":"string"},"path":{"type":"string"},"note":{"type":"string"}}}`), Kind: "builtin", Enabled: true, IsBuiltin: true},
 	}
 }
 
@@ -131,6 +140,8 @@ func (e *Executor) Execute(ctx context.Context, runCtx Context, name string, inp
 		return e.artifactList(ctx, runCtx)
 	case "artifact.get":
 		return e.artifactGet(ctx, runCtx, input)
+	case "recall_artifact":
+		return e.recallArtifact(ctx, runCtx, input)
 	default:
 		return e.customTool(ctx, runCtx, name, input)
 	}
@@ -663,6 +674,248 @@ func (e *Executor) artifactGet(ctx context.Context, runCtx Context, input json.R
 		return Result{}, err
 	}
 	return Result{Output: map[string]any{"id": id, "kind": kind, "path": path, "mime_type": mime, "size_bytes": size, "content": string(content), "created_at": created}}, nil
+}
+
+// recallArtifact resolves an artifact produced earlier in this chat session
+// (by id or workspace-relative path), registers a row for it under the
+// current run, and emits a user.event that the runtime's pending-user-event
+// loop will inline as multimodal content on the next model step. This is the
+// model-driven path for resurfacing a prior screenshot, PDF, etc.
+func (e *Executor) recallArtifact(ctx context.Context, runCtx Context, input json.RawMessage) (Result, error) {
+	var req struct {
+		ArtifactID string `json:"artifact_id"`
+		Path       string `json:"path"`
+		Note       string `json:"note"`
+	}
+	if err := json.Unmarshal(input, &req); err != nil {
+		return Result{}, err
+	}
+	req.ArtifactID = strings.TrimSpace(req.ArtifactID)
+	req.Path = strings.TrimSpace(req.Path)
+	if req.ArtifactID == "" && req.Path == "" {
+		return Result{}, fmt.Errorf("recall_artifact requires artifact_id or path")
+	}
+	if e.DB == nil {
+		return Result{}, fmt.Errorf("recall_artifact requires a database")
+	}
+
+	// Scope to the chat session this run belongs to. If the run has no
+	// session (ad-hoc run), only allow recall within the same run.
+	var sessionID string
+	_ = e.DB.QueryRowContext(ctx, `SELECT session_id FROM session_runs WHERE run_id=? LIMIT 1`, runCtx.RunID).Scan(&sessionID)
+
+	var srcID, srcKind, srcPath, srcMIME string
+	var srcSize int64
+	var found bool
+
+	if req.ArtifactID != "" {
+		row := e.queryArtifactByID(ctx, sessionID, runCtx.RunID, req.ArtifactID)
+		if row != nil {
+			srcID, srcKind, srcPath, srcMIME, srcSize = row.id, row.kind, row.path, row.mime, row.size
+			found = true
+		}
+	}
+	if !found && req.Path != "" {
+		resolvedPath, err := safePath(runCtx.Workspace, req.Path)
+		if err != nil {
+			return Result{}, err
+		}
+		row := e.queryArtifactByPath(ctx, sessionID, runCtx.RunID, resolvedPath)
+		if row != nil {
+			srcID, srcKind, srcPath, srcMIME, srcSize = row.id, row.kind, row.path, row.mime, row.size
+			found = true
+		} else if _, statErr := os.Stat(resolvedPath); statErr == nil {
+			// Adopt the workspace file as a new artifact for this run even if
+			// no prior artifact row existed.
+			srcID = ""
+			srcKind = guessArtifactKind(resolvedPath)
+			srcPath = resolvedPath
+			srcMIME = guessMIMEFromPath(resolvedPath)
+			if info, err := os.Stat(resolvedPath); err == nil {
+				srcSize = info.Size()
+			}
+			found = true
+		}
+	}
+	if !found {
+		return Result{}, fmt.Errorf("recall_artifact: no matching artifact in this chat session")
+	}
+	if _, err := os.Stat(srcPath); err != nil {
+		return Result{}, fmt.Errorf("recall_artifact: source file missing on disk: %w", err)
+	}
+
+	newID := uuid.NewString()
+	if err := e.insertArtifactRecord(runCtx, firstNonEmpty(srcKind, "recalled"), srcPath, srcMIME, srcSize); err != nil {
+		return Result{}, err
+	}
+	// Read back the id we just inserted — insertArtifactRecord uses its own
+	// uuid, so fetch by path+run_id to get the authoritative row.
+	var resolvedID string
+	_ = e.DB.QueryRowContext(ctx, `
+		SELECT id FROM artifacts WHERE run_id=? AND path=? ORDER BY created_at DESC LIMIT 1
+	`, runCtx.RunID, srcPath).Scan(&resolvedID)
+	if strings.TrimSpace(resolvedID) == "" {
+		resolvedID = newID
+	}
+
+	payload := map[string]any{
+		"source":      "tool.recall_artifact",
+		"message":     buildRecallEventMessage(req.Note, resolvedID, srcPath, srcMIME, srcID),
+		"attachments": []string{resolvedID},
+	}
+	if e.EventSink == nil {
+		return Result{}, fmt.Errorf("recall_artifact: event sink not configured")
+	}
+	if err := e.EventSink.AppendEvent(ctx, runCtx.RunID, runCtx.StepID, "user.event", payload); err != nil {
+		return Result{}, fmt.Errorf("recall_artifact: failed to queue attachment event: %w", err)
+	}
+
+	rel := srcPath
+	if runCtx.Workspace != "" {
+		if r, rerr := filepath.Rel(runCtx.Workspace, srcPath); rerr == nil {
+			rel = filepath.ToSlash(r)
+		}
+	}
+	return Result{Output: map[string]any{
+		"ok":              true,
+		"artifact_id":     resolvedID,
+		"source_artifact": srcID,
+		"kind":            srcKind,
+		"mime_type":       srcMIME,
+		"size_bytes":      srcSize,
+		"path":            rel,
+		"message":         "Attachment queued; it will be visible on the next model step.",
+	}}, nil
+}
+
+type artifactRow struct {
+	id, kind, path, mime string
+	size                 int64
+}
+
+func (e *Executor) queryArtifactByID(ctx context.Context, sessionID, runID, artifactID string) *artifactRow {
+	if strings.TrimSpace(artifactID) == "" {
+		return nil
+	}
+	row := &artifactRow{}
+	if sessionID != "" {
+		err := e.DB.QueryRowContext(ctx, `
+			SELECT a.id,a.kind,a.path,a.mime_type,a.size_bytes
+			FROM artifacts a
+			JOIN session_runs sr ON sr.run_id=a.run_id
+			WHERE sr.session_id=? AND a.id=?
+			ORDER BY a.created_at DESC LIMIT 1
+		`, sessionID, artifactID).Scan(&row.id, &row.kind, &row.path, &row.mime, &row.size)
+		if err == nil {
+			return row
+		}
+	}
+	err := e.DB.QueryRowContext(ctx, `
+		SELECT id,kind,path,mime_type,size_bytes FROM artifacts
+		WHERE run_id=? AND id=?
+	`, runID, artifactID).Scan(&row.id, &row.kind, &row.path, &row.mime, &row.size)
+	if err != nil {
+		return nil
+	}
+	return row
+}
+
+func (e *Executor) queryArtifactByPath(ctx context.Context, sessionID, runID, absPath string) *artifactRow {
+	row := &artifactRow{}
+	if sessionID != "" {
+		err := e.DB.QueryRowContext(ctx, `
+			SELECT a.id,a.kind,a.path,a.mime_type,a.size_bytes
+			FROM artifacts a
+			JOIN session_runs sr ON sr.run_id=a.run_id
+			WHERE sr.session_id=? AND a.path=?
+			ORDER BY a.created_at DESC LIMIT 1
+		`, sessionID, absPath).Scan(&row.id, &row.kind, &row.path, &row.mime, &row.size)
+		if err == nil {
+			return row
+		}
+	}
+	err := e.DB.QueryRowContext(ctx, `
+		SELECT id,kind,path,mime_type,size_bytes FROM artifacts
+		WHERE run_id=? AND path=?
+		ORDER BY created_at DESC LIMIT 1
+	`, runID, absPath).Scan(&row.id, &row.kind, &row.path, &row.mime, &row.size)
+	if err != nil {
+		return nil
+	}
+	return row
+}
+
+func buildRecallEventMessage(note, artifactID, path, mime, sourceID string) string {
+	clean := strings.TrimSpace(note)
+	if clean == "" {
+		clean = "Re-attached artifact from earlier in this chat session."
+	}
+	details := []string{clean,
+		fmt.Sprintf("Attachment: id=%s mime=%s path=%s", artifactID, strings.TrimSpace(mime), strings.TrimSpace(path)),
+	}
+	if strings.TrimSpace(sourceID) != "" && sourceID != artifactID {
+		details = append(details, "Originated from artifact "+sourceID+".")
+	}
+	return strings.Join(details, "\n")
+}
+
+func firstNonEmpty(a, b string) string {
+	if strings.TrimSpace(a) != "" {
+		return a
+	}
+	return b
+}
+
+func guessArtifactKind(p string) string {
+	switch strings.ToLower(filepath.Ext(p)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
+		return "screenshot"
+	case ".pdf":
+		return "pdf"
+	case ".svg":
+		return "svg"
+	case ".mp4", ".mov", ".webm":
+		return "video"
+	case ".mp3", ".wav", ".m4a":
+		return "audio"
+	case ".log", ".txt":
+		return "log"
+	default:
+		return "file"
+	}
+}
+
+func guessMIMEFromPath(p string) string {
+	switch strings.ToLower(filepath.Ext(p)) {
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".svg":
+		return "image/svg+xml"
+	case ".pdf":
+		return "application/pdf"
+	case ".mp4":
+		return "video/mp4"
+	case ".mov":
+		return "video/quicktime"
+	case ".webm":
+		return "video/webm"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".wav":
+		return "audio/wav"
+	case ".m4a":
+		return "audio/mp4"
+	case ".txt", ".log":
+		return "text/plain"
+	default:
+		return "application/octet-stream"
+	}
 }
 
 func safePath(workspace, p string) (string, error) {
