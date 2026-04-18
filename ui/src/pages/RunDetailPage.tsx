@@ -80,7 +80,7 @@ export function RunDetailPage() {
   const [expandedRowID, setExpandedRowID] = useState('')
   const [expandedEventRowID, setExpandedEventRowID] = useState('')
   const [isArtifactsModalOpen, setIsArtifactsModalOpen] = useState(false)
-  const [hoveredTimelineSpanID, setHoveredTimelineSpanID] = useState('')
+  const [timelineTooltip, setTimelineTooltip] = useState<{ x: number; y: number; name: string; duration: string; actor: string } | null>(null)
 
   const steer = useMutation({
     mutationFn: (message: string) => api.steerRun(id, { message }),
@@ -245,17 +245,27 @@ export function RunDetailPage() {
       windowLabel: `${formatDuration(timeline.total)} window`,
     }
   }, [timeline])
-  const hoveredTimelineSpan = useMemo(() => {
-    if (!timeline || !hoveredTimelineSpanID) return null
-    const span = timeline.spans.find((s) => s.id === hoveredTimelineSpanID)
-    if (!span) return null
-    const spanMs = Math.max(0, (span.__end || span.__start) - span.__start)
-    return {
-      name: span.name,
-      actor: span.__actor,
-      durationLabel: formatDuration(spanMs),
+  const timelineRows = useMemo(() => {
+    type TSpan = (typeof spans)[number]
+    if (!timeline) return [] as TSpan[][]
+    const sorted = [...timeline.spans].sort((a, b) => a.__start - b.__start)
+    const rows: TSpan[][] = []
+    for (const span of sorted) {
+      const start = span.__start
+      let placed = false
+      for (const row of rows) {
+        const last = row[row.length - 1]
+        const lastEnd = last.__end || last.__start
+        if (lastEnd <= start) {
+          row.push(span)
+          placed = true
+          break
+        }
+      }
+      if (!placed) rows.push([span])
     }
-  }, [timeline, hoveredTimelineSpanID])
+    return rows
+  }, [timeline, spans])
 
   const metrics = useMemo(() => {
     const run = runQ.data
@@ -472,62 +482,132 @@ export function RunDetailPage() {
           {activeTab === 'transcript' ? (
             <>
               {/* Timeline Component */}
-              <div className="mb-8 rounded-lg border border-gray-200 bg-white p-3 shadow-sm">
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-700">
-                      {timelineMeta?.totalSpans ?? 0} spans
+              <div className="mb-8 rounded-lg border border-gray-200 bg-white px-4 pt-3 pb-2.5 shadow-sm">
+                <div className="mb-2.5 flex items-center justify-between gap-3 text-xs">
+                  <div className="flex items-baseline gap-2">
+                    <span className="font-mono text-sm font-semibold tabular-nums text-gray-900">
+                      {formatDuration(timeline?.total ?? 0)}
                     </span>
-                    <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-700">
-                      {timelineMeta?.windowLabel ?? '0s window'}
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px]">
-                      <span className="h-2 w-2 rounded bg-[#60A5FA]" />
-                      Orchestrator {timelineMeta?.orchestrator ?? 0}
-                    </span>
-                    <span className="inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px]">
-                      <span className="h-2 w-2 rounded bg-[#F472B6]" />
-                      Tools {timelineMeta?.tools ?? 0}
-                    </span>
+                    <span className="text-gray-400">·</span>
+                    <span className="text-gray-600">{timelineMeta?.totalSpans ?? 0} {timelineMeta?.totalSpans === 1 ? 'span' : 'spans'}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                    {(timelineMeta?.orchestrator ?? 0) > 0 ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-sm bg-[#60A5FA]" />
+                        <span className="tabular-nums">{timelineMeta?.orchestrator}</span>
+                        <span className="text-gray-400">orch</span>
+                      </span>
+                    ) : null}
+                    {(timelineMeta?.tools ?? 0) > 0 ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-sm bg-[#F472B6]" />
+                        <span className="tabular-nums">{timelineMeta?.tools}</span>
+                        <span className="text-gray-400">tool</span>
+                      </span>
+                    ) : null}
                     {(timelineMeta?.system ?? 0) > 0 ? (
-                      <span className="inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px]">
-                        <span className="h-2 w-2 rounded bg-gray-300" />
-                        System {timelineMeta?.system ?? 0}
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-sm bg-gray-300" />
+                        <span className="tabular-nums">{timelineMeta?.system}</span>
+                        <span className="text-gray-400">sys</span>
                       </span>
                     ) : null}
                   </div>
-                  <span className="text-[11px] text-gray-400">
-                    {hoveredTimelineSpan
-                      ? `${hoveredTimelineSpan.name} • ${hoveredTimelineSpan.durationLabel} • ${hoveredTimelineSpan.actor}`
-                      : 'hover spans for details'}
-                  </span>
                 </div>
-                <div className="w-full h-10 rounded relative overflow-hidden flex items-center bg-white">
-                  {timeline && timeline.spans.map((span) => {
-                    const start = ((span.__start - timeline.min) / timeline.total) * 100
-                    const spanMs = Math.max(0, (span.__end || span.__start) - span.__start)
-                    const width = Math.max(0.5, (spanMs / timeline.total) * 100)
-                    const bg = span.__actor === 'tools' ? 'bg-[#F472B6]' : span.__actor === 'orchestrator' ? 'bg-[#60A5FA]' : 'bg-gray-300'
-                    return (
-                      <div
-                        key={span.id}
-                        className={`absolute h-6 rounded-[3px] opacity-80 hover:opacity-100 transition-opacity cursor-pointer shadow-sm ${bg}`}
-                        style={{ left: `${start}%`, width: `${width}%` }}
-                        title={`${span.name} • ${formatDuration(spanMs)} • ${span.__actor}`}
-                        tabIndex={0}
-                        onMouseEnter={() => setHoveredTimelineSpanID(span.id)}
-                        onMouseLeave={() => setHoveredTimelineSpanID((prev) => (prev === span.id ? '' : prev))}
-                        onFocus={() => setHoveredTimelineSpanID(span.id)}
-                        onBlur={() => setHoveredTimelineSpanID((prev) => (prev === span.id ? '' : prev))}
-                      />
-                    )
-                  })}
-                </div>
-                <div className="mt-1.5 flex items-center justify-between text-[11px] text-gray-400">
-                  <span>0s</span>
-                  <span>{timelineMeta?.windowLabel ?? '0s window'}</span>
+                <div className="relative w-full">
+                  {timeline ? (
+                    <div className="space-y-[3px]">
+                      {timelineRows.map((row, rowIdx) => (
+                        <div key={rowIdx} className="relative h-5 w-full">
+                          {row.map((span) => {
+                            const start = ((span.__start - timeline.min) / timeline.total) * 100
+                            const spanMs = Math.max(0, (span.__end || span.__start) - span.__start)
+                            const width = Math.max(0.3, (spanMs / timeline.total) * 100)
+                            const bg = span.__actor === 'tools'
+                              ? 'bg-[#F472B6] hover:opacity-100'
+                              : span.__actor === 'orchestrator'
+                                ? 'bg-[#60A5FA] hover:opacity-100'
+                                : 'bg-gray-300 hover:opacity-100'
+                            return (
+                              <button
+                                type="button"
+                                key={span.id}
+                                className={`group absolute top-0 h-5 rounded-[2px] ${bg} cursor-pointer opacity-80 transition-opacity`}
+                                style={{ left: `${start}%`, width: `${width}%` }}
+                                aria-label={`${span.name}, ${formatDuration(spanMs)}, ${span.__actor}`}
+                                onMouseMove={(ev) => {
+                                  setTimelineTooltip({
+                                    x: ev.clientX,
+                                    y: ev.clientY,
+                                    name: span.name,
+                                    duration: formatDuration(spanMs),
+                                    actor: span.__actor,
+                                  })
+                                }}
+                                onMouseLeave={() => setTimelineTooltip(null)}
+                                onFocus={(ev) => {
+                                  const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect()
+                                  setTimelineTooltip({
+                                    x: rect.left + rect.width / 2,
+                                    y: rect.top,
+                                    name: span.name,
+                                    duration: formatDuration(spanMs),
+                                    actor: span.__actor,
+                                  })
+                                }}
+                                onBlur={() => setTimelineTooltip(null)}
+                                onClick={() => {
+                                  const targetMs = span.__start
+                                  let best: { id: string; dist: number } | null = null
+                                  for (const ev of eventRows) {
+                                    const evMs = parseTimeMs(ev.created_at)
+                                    if (!Number.isFinite(evMs)) continue
+                                    const dist = Math.abs(evMs - targetMs)
+                                    if (!best || dist < best.dist) best = { id: ev.id, dist }
+                                  }
+                                  if (best && best.dist < 2000) {
+                                    const el = document.getElementById(`run-event-${best.id}`)
+                                    if (el) {
+                                      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                                      setExpandedRowID(best.id)
+                                    }
+                                  }
+                                }}
+                              />
+                            )
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="h-5 w-full rounded-sm bg-gray-50" />
+                  )}
+                  <div className="mt-2 flex h-3 w-full items-start justify-between border-t border-gray-100 pt-1 text-[10px] tabular-nums text-gray-400">
+                    {[0, 0.25, 0.5, 0.75, 1].map((frac) => (
+                      <span
+                        key={frac}
+                        className={frac === 0 ? 'text-left' : frac === 1 ? 'text-right' : 'text-center'}
+                      >
+                        {formatDuration(Math.round((timeline?.total ?? 0) * frac))}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
+              {timelineTooltip ? (
+                <div
+                  className="pointer-events-none fixed z-50 max-w-xs rounded-md bg-gray-900 px-2.5 py-1.5 text-[11px] leading-tight text-white shadow-lg"
+                  style={{ left: timelineTooltip.x + 12, top: timelineTooltip.y + 16 }}
+                >
+                  <div className="font-medium">{timelineTooltip.name}</div>
+                  <div className="mt-0.5 flex items-center gap-1.5 text-gray-300">
+                    <span className="tabular-nums">{timelineTooltip.duration}</span>
+                    <span className="text-gray-500">·</span>
+                    <span>{timelineTooltip.actor}</span>
+                  </div>
+                </div>
+              ) : null}
 
               {/* Agent Tabs */}
               <div className="flex items-center gap-6 border-b border-gray-200 mb-6 max-w-5xl mx-auto">
@@ -544,7 +624,7 @@ export function RunDetailPage() {
                   const rowArtifacts = stepArtifactsByStepID[ev.step_id] ?? []
                   
                   return (
-                    <div key={ev.id} className={`group border transition-colors rounded-md px-3 py-2 ${expanded ? 'bg-white border-gray-200 shadow-sm' : 'border-transparent hover:border-gray-200 hover:bg-white hover:shadow-sm'}`}>
+                    <div key={ev.id} id={`run-event-${ev.id}`} className={`group border transition-colors rounded-md px-3 py-2 scroll-mt-24 ${expanded ? 'bg-white border-gray-200 shadow-sm' : 'border-transparent hover:border-gray-200 hover:bg-white hover:shadow-sm'}`}>
                       <div className="flex items-start gap-3 cursor-pointer" onClick={() => setExpandedRowID(expanded ? '' : ev.id)}>
                         <div className="w-[140px] shrink-0 pt-0.5 text-right flex justify-end">
                           <span className={`inline-flex items-center justify-center px-2 py-0.5 text-[10px] uppercase tracking-wide font-bold rounded shadow-sm ${getRoleColor(role)}`}>
