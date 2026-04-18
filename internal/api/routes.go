@@ -23,18 +23,34 @@ import (
 )
 
 type createAgentRequest struct {
-	Name                  string   `json:"name"`
-	Description           string   `json:"description"`
-	Provider              string   `json:"provider"`
-	Model                 string   `json:"model"`
-	SystemPrompt          string   `json:"system_prompt"`
-	AllowedTools          []string `json:"allowed_tools"`
-	StarterPrompts        []string `json:"starter_prompts"`
-	DefaultTask           string   `json:"default_task"`
-	DefaultMaxSteps       int      `json:"default_max_steps"`
-	DefaultWorkspacePath  string   `json:"default_workspace_path"`
-	OutputContractType    string   `json:"output_contract_type"`
-	OutputContractPayload string   `json:"output_contract_payload"`
+	Name                     string   `json:"name"`
+	Description              string   `json:"description"`
+	Provider                 string   `json:"provider"`
+	Model                    string   `json:"model"`
+	SystemPrompt             string   `json:"system_prompt"`
+	AllowedTools             []string `json:"allowed_tools"`
+	StarterPrompts           []string `json:"starter_prompts"`
+	DefaultTask              string   `json:"default_task"`
+	DefaultMaxSteps          int      `json:"default_max_steps"`
+	DefaultWorkspacePath     string   `json:"default_workspace_path"`
+	DefaultEnvironmentID     string   `json:"default_environment_id"`
+	DefaultCredentialVaultID string   `json:"default_credential_vault_id"`
+	OutputContractType       string   `json:"output_contract_type"`
+	OutputContractPayload    string   `json:"output_contract_payload"`
+	PlanningMode             string   `json:"planning_mode"`
+}
+
+func normalizePlanningMode(mode string) (string, error) {
+	switch strings.TrimSpace(strings.ToLower(mode)) {
+	case "", "off":
+		return "off", nil
+	case "suggest":
+		return "suggest", nil
+	case "required":
+		return "required", nil
+	default:
+		return "", fmt.Errorf("invalid planning_mode %q (must be off, suggest, or required)", mode)
+	}
 }
 
 type createRunRequest struct {
@@ -289,18 +305,24 @@ func createAgentHandler(db *sql.DB) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		planningMode, err := normalizePlanningMode(req.PlanningMode)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		req.StarterPrompts = normalizeStarterPrompts(req.StarterPrompts)
 		id := uuid.NewString()
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		toolsJSON, _ := json.Marshal(req.AllowedTools)
 		starterPromptsJSON, _ := json.Marshal(req.StarterPrompts)
-		_, err := db.ExecContext(r.Context(), `
+		_, err = db.ExecContext(r.Context(), `
 			INSERT INTO agents(
 				id,name,description,provider,model,system_prompt,allowed_tools,starter_prompts,
-				default_task,default_max_steps,default_workspace_path,output_contract_type,output_contract_payload,created_at,updated_at
+				default_task,default_max_steps,default_workspace_path,default_environment_id,default_credential_vault_id,
+				output_contract_type,output_contract_payload,planning_mode,created_at,updated_at
 			)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-		`, id, req.Name, req.Description, req.Provider, req.Model, req.SystemPrompt, string(toolsJSON), string(starterPromptsJSON), req.DefaultTask, req.DefaultMaxSteps, req.DefaultWorkspacePath, normalizeOutputContractType(req.OutputContractType), strings.TrimSpace(req.OutputContractPayload), now, now)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+		`, id, req.Name, req.Description, req.Provider, req.Model, req.SystemPrompt, string(toolsJSON), string(starterPromptsJSON), req.DefaultTask, req.DefaultMaxSteps, req.DefaultWorkspacePath, strings.TrimSpace(req.DefaultEnvironmentID), strings.TrimSpace(req.DefaultCredentialVaultID), normalizeOutputContractType(req.OutputContractType), strings.TrimSpace(req.OutputContractPayload), planningMode, now, now)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -312,7 +334,7 @@ func createAgentHandler(db *sql.DB) http.HandlerFunc {
 func listAgentsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rows, err := db.QueryContext(r.Context(), `
-			SELECT id,name,description,provider,model,system_prompt,allowed_tools,starter_prompts,default_task,default_max_steps,default_workspace_path,output_contract_type,output_contract_payload,created_at,updated_at
+			SELECT id,name,description,provider,model,system_prompt,allowed_tools,starter_prompts,default_task,default_max_steps,default_workspace_path,default_environment_id,default_credential_vault_id,output_contract_type,output_contract_payload,planning_mode,created_at,updated_at
 			FROM agents
 			ORDER BY created_at DESC
 		`)
@@ -323,9 +345,9 @@ func listAgentsHandler(db *sql.DB) http.HandlerFunc {
 		defer rows.Close()
 		out := make([]map[string]any, 0)
 		for rows.Next() {
-			var id, name, desc, provider, model, prompt, tools, starterPrompts, defaultTask, defaultWorkspacePath, outputContractType, outputContractPayload, createdAt, updatedAt string
+			var id, name, desc, provider, model, prompt, tools, starterPrompts, defaultTask, defaultWorkspacePath, defaultEnvID, defaultVaultID, outputContractType, outputContractPayload, planningMode, createdAt, updatedAt string
 			var defaultMaxSteps int
-			if err := rows.Scan(&id, &name, &desc, &provider, &model, &prompt, &tools, &starterPrompts, &defaultTask, &defaultMaxSteps, &defaultWorkspacePath, &outputContractType, &outputContractPayload, &createdAt, &updatedAt); err != nil {
+			if err := rows.Scan(&id, &name, &desc, &provider, &model, &prompt, &tools, &starterPrompts, &defaultTask, &defaultMaxSteps, &defaultWorkspacePath, &defaultEnvID, &defaultVaultID, &outputContractType, &outputContractPayload, &planningMode, &createdAt, &updatedAt); err != nil {
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
@@ -333,8 +355,10 @@ func listAgentsHandler(db *sql.DB) http.HandlerFunc {
 				"id": id, "name": name, "description": desc, "provider": provider, "model": model,
 				"system_prompt": prompt, "allowed_tools": json.RawMessage(tools), "starter_prompts": json.RawMessage(starterPrompts),
 				"default_task": defaultTask, "default_max_steps": defaultMaxSteps, "default_workspace_path": defaultWorkspacePath,
+				"default_environment_id": defaultEnvID, "default_credential_vault_id": defaultVaultID,
 				"output_contract_type": outputContractType, "output_contract_payload": outputContractPayload,
-				"created_at": createdAt, "updated_at": updatedAt,
+				"planning_mode": planningMode,
+				"created_at":    createdAt, "updated_at": updatedAt,
 			})
 		}
 		writeJSON(w, http.StatusOK, out)
@@ -364,15 +388,20 @@ func updateAgentHandler(db *sql.DB) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		planningMode, err := normalizePlanningMode(req.PlanningMode)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
 		req.StarterPrompts = normalizeStarterPrompts(req.StarterPrompts)
 		toolsJSON, _ := json.Marshal(req.AllowedTools)
 		starterPromptsJSON, _ := json.Marshal(req.StarterPrompts)
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		res, err := db.ExecContext(r.Context(), `
 			UPDATE agents
-			SET name=?, description=?, provider=?, model=?, system_prompt=?, allowed_tools=?, starter_prompts=?, default_task=?, default_max_steps=?, default_workspace_path=?, output_contract_type=?, output_contract_payload=?, updated_at=?
+			SET name=?, description=?, provider=?, model=?, system_prompt=?, allowed_tools=?, starter_prompts=?, default_task=?, default_max_steps=?, default_workspace_path=?, default_environment_id=?, default_credential_vault_id=?, output_contract_type=?, output_contract_payload=?, planning_mode=?, updated_at=?
 			WHERE id=?
-		`, req.Name, req.Description, req.Provider, req.Model, req.SystemPrompt, string(toolsJSON), string(starterPromptsJSON), req.DefaultTask, req.DefaultMaxSteps, req.DefaultWorkspacePath, normalizeOutputContractType(req.OutputContractType), strings.TrimSpace(req.OutputContractPayload), now, agentID)
+		`, req.Name, req.Description, req.Provider, req.Model, req.SystemPrompt, string(toolsJSON), string(starterPromptsJSON), req.DefaultTask, req.DefaultMaxSteps, req.DefaultWorkspacePath, strings.TrimSpace(req.DefaultEnvironmentID), strings.TrimSpace(req.DefaultCredentialVaultID), normalizeOutputContractType(req.OutputContractType), strings.TrimSpace(req.OutputContractPayload), planningMode, now, agentID)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return

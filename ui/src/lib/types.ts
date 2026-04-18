@@ -1,3 +1,5 @@
+export type PlanningMode = 'off' | 'suggest' | 'required'
+
 export type Agent = {
   id: string
   name: string
@@ -10,8 +12,11 @@ export type Agent = {
   default_task: string
   default_max_steps: number
   default_workspace_path: string
+  default_environment_id?: string
+  default_credential_vault_id?: string
   output_contract_type?: 'none' | 'json_schema' | 'regex' | string
   output_contract_payload?: string
+  planning_mode?: PlanningMode
   created_at: string
   updated_at: string
 }
