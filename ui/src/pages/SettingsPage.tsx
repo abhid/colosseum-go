@@ -13,7 +13,7 @@ export function SettingsPage() {
       <SectionTitle title="Settings" subtitle="Provider and environment status." />
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Providers</h3>
-        {providers.isLoading ? <LoadingState label="Loading providers..." /> : null}
+        {providers.isLoading ? <LoadingState label="Loading providers…" /> : null}
         <QueryErrorState title="Failed to load providers" query={providers} />
         <div className="space-y-3">
           {!providers.isLoading && !providers.isError && (providers.data ?? []).length === 0 ? <EmptyState title="No providers detected" body="Configure provider credentials and restart the server." /> : (providers.data ?? []).map((p) => (
@@ -34,11 +34,11 @@ export function SettingsPage() {
         <QueryErrorState title="Failed to load credential vaults" query={vaults} />
         <div className="grid gap-3 md:grid-cols-2">
           <div className="rounded-lg border border-gray-200 p-4">
-            <p className="text-xs uppercase tracking-wide text-gray-500">Environments</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Environments</p>
             <p className="mt-1 text-lg font-semibold text-gray-900">{(environments.data ?? []).length}</p>
           </div>
           <div className="rounded-lg border border-gray-200 p-4">
-            <p className="text-xs uppercase tracking-wide text-gray-500">Credential Vaults</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Credential Vaults</p>
             <p className="mt-1 text-lg font-semibold text-gray-900">{(vaults.data ?? []).length}</p>
           </div>
         </div>

@@ -1,8 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { Card, EmptyState, LoadingState, QueryErrorState, SectionTitle } from '../components/Common'
+import { Card, EmptyState, ErrorBanner, LoadingState, QueryErrorState, SectionTitle } from '../components/Common'
+import { Button } from '../components/ui/Button'
+import { FOCUS_RING } from '../lib/tokens'
 import { api } from '../lib/api'
 import { queryKeys } from '../lib/queryKeys'
+
+const INPUT_CLASSES = `h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm transition-colors focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 ${FOCUS_RING}`
 
 export function CredentialVaultsPage() {
   const qc = useQueryClient()
@@ -52,11 +56,11 @@ export function CredentialVaultsPage() {
   })
   const createSecret = useMutation({
     mutationFn: () => {
-      const name = newSecretName.trim()
+      const trimmedName = newSecretName.trim()
       const value = newSecretValue
-      if (!name) throw new Error('Secret name is required')
+      if (!trimmedName) throw new Error('Secret name is required')
       if (!value.trim()) throw new Error('Secret value is required')
-      return api.createSecret({ name, value })
+      return api.createSecret({ name: trimmedName, value })
     },
     onSuccess: () => {
       setSecretError('')
@@ -65,7 +69,7 @@ export function CredentialVaultsPage() {
     },
   })
   const deleteSecret = useMutation({
-    mutationFn: (name: string) => api.deleteSecret(name),
+    mutationFn: (n: string) => api.deleteSecret(n),
     onSuccess: () => {
       setSecretError('')
       qc.invalidateQueries({ queryKey: queryKeys.secrets })
@@ -95,26 +99,31 @@ export function CredentialVaultsPage() {
       <SectionTitle title="Credential Vaults" subtitle="Group existing secrets and control session secret scope." />
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Create Vault</h3>
+        <label htmlFor="vault-name" className="sr-only">Vault name</label>
         <input
-          className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
+          id="vault-name"
+          className={INPUT_CLASSES}
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Vault name"
         />
+        <label htmlFor="vault-desc" className="sr-only">Description</label>
         <input
-          className="mt-3 h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
+          id="vault-desc"
+          className={`${INPUT_CLASSES} mt-3`}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="Description"
         />
-        <button
-          className="mt-4 h-9 rounded-md bg-gray-900 px-4 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
-          disabled={createVault.isPending}
-          onClick={() => createVault.mutate()}
-        >
-          {createVault.isPending ? 'Creating...' : 'Create Vault'}
-        </button>
-        {createVault.error ? <p className="mt-2 text-sm text-red-600">{String(createVault.error)}</p> : null}
+        <div className="mt-4">
+          <Button
+            disabled={createVault.isPending}
+            onClick={() => createVault.mutate()}
+          >
+            {createVault.isPending ? 'Creating…' : 'Create Vault'}
+          </Button>
+        </div>
+        <ErrorBanner className="mt-2" title="Couldn't create vault" message={createVault.error ? (createVault.error as Error).message : undefined} />
       </Card>
 
       <Card>
@@ -123,23 +132,32 @@ export function CredentialVaultsPage() {
           Secrets are encrypted at rest and injected into runs as environment variables through vault bindings.
         </p>
         <div className="grid gap-2 md:grid-cols-2">
-          <input
-            className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
-            value={newSecretName}
-            onChange={(e) => setNewSecretName(e.target.value)}
-            placeholder="Secret name (example: OPENAI_API_KEY)"
-          />
-          <input
-            className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
-            type="password"
-            value={newSecretValue}
-            onChange={(e) => setNewSecretValue(e.target.value)}
-            placeholder="Secret value"
-          />
+          <div>
+            <label htmlFor="secret-name" className="sr-only">Secret name</label>
+            <input
+              id="secret-name"
+              className={INPUT_CLASSES}
+              value={newSecretName}
+              onChange={(e) => setNewSecretName(e.target.value)}
+              placeholder="Secret name (example: OPENAI_API_KEY)"
+            />
+          </div>
+          <div>
+            <label htmlFor="secret-value" className="sr-only">Secret value</label>
+            <input
+              id="secret-value"
+              className={INPUT_CLASSES}
+              type="password"
+              value={newSecretValue}
+              onChange={(e) => setNewSecretValue(e.target.value)}
+              placeholder="Secret value"
+            />
+          </div>
         </div>
-        <div className="mt-2 flex items-center gap-2">
-          <button
-            className="h-8 rounded-md border border-gray-300 px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+        <div className="mt-2">
+          <Button
+            size="sm"
+            variant="secondary"
             disabled={createSecret.isPending}
             onClick={async () => {
               setSecretError('')
@@ -150,22 +168,22 @@ export function CredentialVaultsPage() {
               }
             }}
           >
-            {createSecret.isPending ? 'Saving...' : 'Save Secret'}
-          </button>
-          {createSecret.error ? <p className="text-xs text-red-600">{String(createSecret.error)}</p> : null}
+            {createSecret.isPending ? 'Saving…' : 'Save Secret'}
+          </Button>
         </div>
-        {secretError ? <p className="mt-2 text-xs text-red-600">{secretError}</p> : null}
-        <QueryErrorState title="Failed to load secrets" query={secrets} />
+        <ErrorBanner className="mt-2" title="Couldn't save secret" message={secretError} />
+        <QueryErrorState className="mt-2" title="Failed to load secrets" query={secrets} />
         <div className="mt-3 space-y-1">
           {(secrets.data ?? []).length === 0 ? <p className="text-xs text-gray-500">No secrets yet. Add one to bind it into a vault.</p> : null}
           {(secrets.data ?? []).map((secret) => (
-            <div key={String(secret.name)} className="flex items-center justify-between rounded border border-gray-200 bg-white px-2 py-1.5 text-xs">
+            <div key={String(secret.name)} className="flex items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs">
               <div className="min-w-0">
                 <p className="truncate font-medium text-gray-900">{String(secret.name)}</p>
                 <p className="text-gray-500">Updated {new Date(String(secret.updated_at || secret.created_at)).toLocaleString()}</p>
               </div>
-              <button
-                className="rounded border border-red-200 px-2 py-0.5 font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
+              <Button
+                size="sm"
+                variant="danger"
                 disabled={deleteSecret.isPending}
                 onClick={async () => {
                   setSecretError('')
@@ -177,7 +195,7 @@ export function CredentialVaultsPage() {
                 }}
               >
                 Delete
-              </button>
+              </Button>
             </div>
           ))}
         </div>
@@ -185,24 +203,29 @@ export function CredentialVaultsPage() {
 
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Vaults</h3>
-        {vaults.isLoading ? <LoadingState label="Loading vaults..." /> : null}
+        {vaults.isLoading ? <LoadingState label="Loading vaults…" /> : null}
         <QueryErrorState title="Failed to load vaults" query={vaults} />
         {!vaults.isLoading && !vaults.isError && (vaults.data ?? []).length === 0 ? <EmptyState title="No vaults" body="Create vaults to group secrets for runs." /> : null}
         <div className="space-y-2">
           {(vaults.data ?? []).map((vault) => (
-            <div key={String(vault.id)} className={`rounded border p-2 text-sm ${selectedVaultID === String(vault.id) ? 'border-gray-400 bg-gray-50' : 'border-gray-200'}`}>
+            <div key={String(vault.id)} className={`rounded-md border p-3 text-sm transition-colors ${selectedVaultID === String(vault.id) ? 'border-gray-400 bg-gray-50' : 'border-gray-200'}`}>
               <div className="flex items-center justify-between gap-2">
-                <button className="min-w-0 text-left" onClick={() => setSelectedVaultID(String(vault.id))}>
+                <button
+                  className={`min-w-0 text-left rounded ${FOCUS_RING}`}
+                  onClick={() => setSelectedVaultID(String(vault.id))}
+                  aria-pressed={selectedVaultID === String(vault.id)}
+                >
                   <p className="truncate font-medium text-gray-900">{String(vault.name)}</p>
                   <p className="text-xs text-gray-500">{String(vault.description || '')}</p>
                 </button>
-                <button
-                  className="rounded border border-red-200 px-3 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
+                <Button
+                  size="sm"
+                  variant="danger"
                   disabled={deleteVault.isPending}
                   onClick={() => deleteVault.mutate(String(vault.id))}
                 >
                   Delete
-                </button>
+                </Button>
               </div>
             </div>
           ))}
@@ -215,49 +238,61 @@ export function CredentialVaultsPage() {
           <p className="mb-2 text-xs text-gray-500">
             Each binding becomes an env var in the session. If alias is empty, the secret name is used as the env var key.
           </p>
-          {vaultBindingError ? <p className="mb-2 text-xs text-red-600">{vaultBindingError}</p> : null}
+          <ErrorBanner className="mb-2" title="Couldn't bind secret" message={vaultBindingError} />
           <div className="grid gap-2 md:grid-cols-2">
-            <select
-              className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
-              value={selectedSecretName}
-              onChange={(e) => setSelectedSecretName(e.target.value)}
-            >
-              {(secrets.data ?? []).map((secret) => (
-                <option key={String(secret.name)} value={String(secret.name)}>{String(secret.name)}</option>
-              ))}
-            </select>
-            <input
-              className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
-              value={secretAlias}
-              placeholder="Alias (optional)"
-              onChange={(e) => setSecretAlias(e.target.value)}
-            />
+            <div>
+              <label htmlFor="binding-secret" className="sr-only">Secret</label>
+              <select
+                id="binding-secret"
+                className={INPUT_CLASSES}
+                value={selectedSecretName}
+                onChange={(e) => setSelectedSecretName(e.target.value)}
+              >
+                {(secrets.data ?? []).map((secret) => (
+                  <option key={String(secret.name)} value={String(secret.name)}>{String(secret.name)}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="binding-alias" className="sr-only">Alias</label>
+              <input
+                id="binding-alias"
+                className={INPUT_CLASSES}
+                value={secretAlias}
+                placeholder="Alias (optional)"
+                onChange={(e) => setSecretAlias(e.target.value)}
+              />
+            </div>
           </div>
-          <button
-            className="mt-2 h-8 rounded-md border border-gray-300 px-3 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
-            disabled={!selectedSecretName || addVaultItem.isPending}
-            onClick={async () => {
-              setVaultBindingError('')
-              try {
-                await addVaultItem.mutateAsync()
-              } catch (err) {
-                setVaultBindingError(err instanceof Error ? err.message : 'Failed to bind secret to vault')
-              }
-            }}
-          >
-            Add Secret to Vault
-          </button>
+          <div className="mt-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={!selectedSecretName || addVaultItem.isPending}
+              onClick={async () => {
+                setVaultBindingError('')
+                try {
+                  await addVaultItem.mutateAsync()
+                } catch (err) {
+                  setVaultBindingError(err instanceof Error ? err.message : 'Failed to bind secret to vault')
+                }
+              }}
+            >
+              Add Secret to Vault
+            </Button>
+          </div>
           {(secrets.data ?? []).length === 0 ? (
             <p className="mt-2 text-xs text-gray-500">No secrets available. Add secrets via API before binding them to a vault.</p>
           ) : null}
-          <QueryErrorState title="Failed to load vault items" query={vaultItems} />
+          <QueryErrorState className="mt-2" title="Failed to load vault items" query={vaultItems} />
           <div className="mt-3 space-y-1">
             {(vaultItems.data ?? []).length === 0 ? <p className="text-xs text-gray-500">No secrets bound to this vault yet.</p> : null}
             {(vaultItems.data ?? []).map((item) => (
-              <div key={`${String(item.vault_id)}-${String(item.secret_name)}`} className="flex items-center justify-between rounded border border-gray-200 bg-white px-2 py-1.5 text-xs">
+              <div key={`${String(item.vault_id)}-${String(item.secret_name)}`} className="flex items-center justify-between rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs">
                 <span>{String(item.secret_name)} {String(item.alias || '') ? <span className="text-gray-500">as {String(item.alias)}</span> : null}</span>
-                <button
-                  className="rounded border border-red-200 px-2 py-0.5 font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
+                <Button
+                  size="sm"
+                  variant="danger"
                   disabled={deleteVaultItem.isPending}
                   onClick={async () => {
                     setVaultBindingError('')
@@ -269,7 +304,7 @@ export function CredentialVaultsPage() {
                   }}
                 >
                   Remove
-                </button>
+                </Button>
               </div>
             ))}
           </div>

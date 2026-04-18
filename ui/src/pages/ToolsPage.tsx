@@ -26,7 +26,7 @@ export function ToolsPage() {
 
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Registered Tools</h3>
-        {toolsQuery.isLoading ? <LoadingState label="Loading tools..." /> : null}
+        {toolsQuery.isLoading ? <LoadingState label="Loading tools…" /> : null}
         <QueryErrorState title="Failed to load tools" query={toolsQuery} />
         {!toolsQuery.isLoading && !toolsQuery.isError && defs.length === 0 ? <EmptyState title="No tools" body="No tools are registered in this runtime." /> : (
           <div className="space-y-3">

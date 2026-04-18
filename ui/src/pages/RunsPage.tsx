@@ -2,8 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
-import { Card, EmptyState, LoadingState, QueryErrorState, SectionTitle, StatusBadge } from '../components/Common'
+import { Card, EmptyState, ErrorBanner, LoadingState, QueryErrorState, SectionTitle, StatusBadge } from '../components/Common'
+import { Button } from '../components/ui/Button'
+import { Modal } from '../components/ui/Modal'
+import { Chip } from '../components/ui/Chip'
+import { FOCUS_RING } from '../lib/tokens'
 import { queryKeys } from '../lib/queryKeys'
+
+const INPUT_CLASSES = `h-9 rounded-md border border-gray-300 bg-white px-3 text-sm transition-colors focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 ${FOCUS_RING}`
 
 export function RunsPage() {
   const navigate = useNavigate()
@@ -65,6 +71,13 @@ export function RunsPage() {
     }))
   }, [selectedAgent])
 
+  const onRowKey = (e: React.KeyboardEvent, runId: string) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      navigate(`/runs/${runId}`)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <SectionTitle title="Runs" subtitle="Start and monitor long-lived agent runs." />
@@ -74,33 +87,41 @@ export function RunsPage() {
             <h3 className="text-sm font-semibold tracking-tight text-gray-900">Create Run</h3>
             <p className="mt-1 text-xs text-gray-500">Spin up a long-lived instance of your agent in its environment.</p>
           </div>
-          <button
-            className="h-9 rounded-md bg-gray-900 px-4 text-sm font-medium text-white transition-colors hover:bg-gray-800"
-            onClick={() => setIsCreateOpen(true)}
-          >
-            New Run
-          </button>
+          <Button onClick={() => setIsCreateOpen(true)}>New Run</Button>
         </div>
       </Card>
 
       <Card>
         <h3 className="mb-4 text-sm font-semibold tracking-tight text-gray-900">Recent Runs</h3>
-        {runs.isLoading ? <LoadingState label="Loading runs..." /> : null}
+        {runs.isLoading ? <LoadingState label="Loading runs…" /> : null}
         <QueryErrorState title="Failed to load runs" query={runs} />
-        {!runs.isLoading && !runs.isError && sortedRuns.length === 0 ? <EmptyState title="No runs yet" body="Create your first run to start execution." /> : null}
+        {!runs.isLoading && !runs.isError && sortedRuns.length === 0 ? (
+          <EmptyState title="No runs yet" body="Create your first run to start execution." />
+        ) : null}
         {sortedRuns.length > 0 ? (
           <div className="overflow-x-auto rounded-lg border border-gray-200">
             <table className="w-full text-left text-sm">
               <thead className="bg-gray-50">
-                <tr className="border-b border-gray-200 text-gray-500">
-                  <th className="px-4 py-3 font-medium">Status</th><th className="px-4 py-3 font-medium">Task</th><th className="px-4 py-3 font-medium">Provider</th><th className="px-4 py-3 font-medium">Created</th>
+                <tr className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                  <th className="px-4 py-2.5 font-semibold">Status</th>
+                  <th className="px-4 py-2.5 font-semibold">Task</th>
+                  <th className="px-4 py-2.5 font-semibold">Provider</th>
+                  <th className="px-4 py-2.5 font-semibold">Created</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-gray-100">
                 {sortedRuns.map((run) => (
-                  <tr key={run.id} className="cursor-pointer border-b border-gray-100 transition-colors hover:bg-gray-50/80 last:border-0" onClick={() => navigate(`/runs/${run.id}`)}>
+                  <tr
+                    key={run.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Open run ${run.task.slice(0, 60)}`}
+                    className={`cursor-pointer bg-white transition-colors hover:bg-gray-50 ${FOCUS_RING}`}
+                    onClick={() => navigate(`/runs/${run.id}`)}
+                    onKeyDown={(e) => onRowKey(e, run.id)}
+                  >
                     <td className="px-4 py-3"><StatusBadge status={run.status} /></td>
-                    <td className="px-4 py-3 text-gray-700 font-medium">{run.task.slice(0, 110)}</td>
+                    <td className="px-4 py-3 font-medium text-gray-700">{run.task.slice(0, 110)}</td>
                     <td className="px-4 py-3 text-gray-500">{run.provider}/{run.model}</td>
                     <td className="px-4 py-3 text-gray-500">{new Date(run.created_at).toLocaleString()}</td>
                   </tr>
@@ -111,144 +132,140 @@ export function RunsPage() {
         ) : null}
       </Card>
 
-      {isCreateOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-brightness-75">
-          <div role="dialog" aria-modal="true" className="w-full max-w-3xl rounded-2xl border border-gray-200 bg-white p-5 shadow-xl md:p-6">
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-semibold tracking-tight text-gray-900">Create run</h3>
-                <p className="mt-1 text-sm text-gray-500">Set up an instance of your agent in its environment.</p>
-              </div>
-              <button
-                className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50"
-                onClick={() => setIsCreateOpen(false)}
-                type="button"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <input
-                className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
-                placeholder="Title (optional)"
-                value={form.title}
-                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-              />
-              <select
-                className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
-                value={form.agent_id}
-                onChange={(e) => {
-                  const nextAgentID = e.target.value
-                  const nextAgent = (agents.data ?? []).find((a) => a.id === nextAgentID)
-                  setForm((f) => ({
-                    ...f,
-                    agent_id: nextAgentID,
-                    task: f.task || nextAgent?.default_task || '',
-                  }))
-                }}
-              >
-                <option value="">Select agent</option>
-                {(agents.data ?? []).map((a) => (
-                  <option key={a.id} value={a.id}>{a.name} ({a.provider}/{a.model})</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="mt-2 grid gap-3 md:grid-cols-2">
-              <div>
-                <div className="mb-1 flex items-center justify-between">
-                  <label className="text-xs font-medium uppercase tracking-wide text-gray-500">Environment</label>
-                  <Link to="/environments" className="text-xs text-gray-500 underline underline-offset-2 hover:text-gray-700">Manage environments</Link>
-                </div>
-                <select
-                  className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
-                  value={form.environment_id}
-                  onChange={(e) => setForm((f) => ({ ...f, environment_id: e.target.value }))}
-                >
-                  <option value="">default</option>
-                  {(environments.data ?? []).map((env) => (
-                    <option key={String(env.id)} value={String(env.id)}>{String(env.name || env.id)}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <div className="mb-1 flex items-center justify-between">
-                  <label className="text-xs font-medium uppercase tracking-wide text-gray-500">Credential vault</label>
-                  <Link to="/credential-vaults" className="text-xs text-gray-500 underline underline-offset-2 hover:text-gray-700">Manage vaults</Link>
-                </div>
-                <select
-                  className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
-                  value={form.credential_vault_id}
-                  onChange={(e) => setForm((f) => ({ ...f, credential_vault_id: e.target.value }))}
-                >
-                  <option value="">none</option>
-                  {(vaults.data ?? []).map((vault) => (
-                    <option key={String(vault.id)} value={String(vault.id)}>{String(vault.name || vault.id)}</option>
-                  ))}
-                </select>
-                <p className="mt-1 text-[11px] text-gray-500">
-                  Vault-bound secrets are exposed to the run as environment variables.
-                </p>
-              </div>
-            </div>
-
-            <textarea
-              className="mt-3 min-h-[120px] w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-400 focus:outline-none focus:ring-1 focus:ring-gray-400"
-              placeholder="Task"
-              value={form.task}
-              onChange={(e) => setForm((f) => ({ ...f, task: e.target.value }))}
+      <Modal
+        open={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        eyebrow="Runs"
+        title="Create run"
+        widthClass="max-w-3xl"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="secondary" onClick={() => setIsCreateOpen(false)}>Cancel</Button>
+            <Button disabled={createRun.isPending} onClick={() => createRun.mutate()}>
+              {createRun.isPending ? 'Creating…' : 'Create run'}
+            </Button>
+          </div>
+        }
+      >
+        <p className="mb-4 text-sm text-gray-500">Set up an instance of your agent in its environment.</p>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div>
+            <label htmlFor="run-title" className="sr-only">Run title</label>
+            <input
+              id="run-title"
+              className={INPUT_CLASSES + ' w-full'}
+              placeholder="Title (optional)"
+              value={form.title}
+              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
             />
-            {selectedAgent && selectedAgent.starter_prompts.length > 0 ? (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {selectedAgent.starter_prompts.slice(0, 6).map((prompt) => (
-                  <button
-                    key={prompt}
-                    type="button"
-                    className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-[11px] text-gray-600 transition-colors hover:bg-gray-100"
-                    onClick={() => setForm((f) => ({ ...f, task: prompt }))}
-                  >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-
-            <div className="mt-3 rounded-md border border-dashed border-gray-300 bg-gray-50 p-3">
-              <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-gray-500">Upload files (optional)</label>
-              <input
-                type="file"
-                multiple
-                className="block w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border file:border-gray-300 file:bg-white file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-gray-700 hover:file:bg-gray-50"
-                onChange={(e) => setSelectedFiles(Array.from(e.target.files ?? []))}
-              />
-              {selectedFiles.length > 0 ? (
-                <p className="mt-2 text-xs text-gray-500">{selectedFiles.length} file{selectedFiles.length === 1 ? '' : 's'} selected</p>
-              ) : null}
-            </div>
-
-            {createRun.error ? <p className="mt-3 text-sm text-red-600">{String(createRun.error)}</p> : null}
-
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                className="h-9 rounded-md border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
-                onClick={() => setIsCreateOpen(false)}
-                type="button"
-              >
-                Cancel
-              </button>
-              <button
-                className="h-9 rounded-md bg-gray-900 px-4 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
-                disabled={createRun.isPending}
-                onClick={() => createRun.mutate()}
-                type="button"
-              >
-                {createRun.isPending ? 'Creating...' : 'Create run'}
-              </button>
-            </div>
+          </div>
+          <div>
+            <label htmlFor="run-agent" className="sr-only">Agent</label>
+            <select
+              id="run-agent"
+              className={INPUT_CLASSES + ' w-full'}
+              value={form.agent_id}
+              onChange={(e) => {
+                const nextAgentID = e.target.value
+                const nextAgent = (agents.data ?? []).find((a) => a.id === nextAgentID)
+                setForm((f) => ({
+                  ...f,
+                  agent_id: nextAgentID,
+                  task: f.task || nextAgent?.default_task || '',
+                }))
+              }}
+            >
+              <option value="">Select agent</option>
+              {(agents.data ?? []).map((a) => (
+                <option key={a.id} value={a.id}>{a.name} ({a.provider}/{a.model})</option>
+              ))}
+            </select>
           </div>
         </div>
-      ) : null}
+
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label htmlFor="run-env" className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Environment</label>
+              <Link to="/environments" className={`text-xs text-gray-500 underline underline-offset-2 hover:text-gray-700 rounded ${FOCUS_RING}`}>Manage environments</Link>
+            </div>
+            <select
+              id="run-env"
+              className={INPUT_CLASSES + ' w-full'}
+              value={form.environment_id}
+              onChange={(e) => setForm((f) => ({ ...f, environment_id: e.target.value }))}
+            >
+              <option value="">default</option>
+              {(environments.data ?? []).map((env) => (
+                <option key={String(env.id)} value={String(env.id)}>{String(env.name || env.id)}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label htmlFor="run-vault" className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Credential vault</label>
+              <Link to="/credential-vaults" className={`text-xs text-gray-500 underline underline-offset-2 hover:text-gray-700 rounded ${FOCUS_RING}`}>Manage vaults</Link>
+            </div>
+            <select
+              id="run-vault"
+              className={INPUT_CLASSES + ' w-full'}
+              value={form.credential_vault_id}
+              onChange={(e) => setForm((f) => ({ ...f, credential_vault_id: e.target.value }))}
+            >
+              <option value="">none</option>
+              {(vaults.data ?? []).map((vault) => (
+                <option key={String(vault.id)} value={String(vault.id)}>{String(vault.name || vault.id)}</option>
+              ))}
+            </select>
+            <p className="mt-1 text-[11px] text-gray-500">
+              Vault-bound secrets are exposed to the run as environment variables.
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3">
+          <label htmlFor="run-task" className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Task</label>
+          <textarea
+            id="run-task"
+            className={`${INPUT_CLASSES} min-h-[120px] w-full py-2 leading-snug`}
+            placeholder="What should the agent do?"
+            value={form.task}
+            onChange={(e) => setForm((f) => ({ ...f, task: e.target.value }))}
+          />
+          {selectedAgent && selectedAgent.starter_prompts.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {selectedAgent.starter_prompts.slice(0, 6).map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  className={`rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-[11px] text-gray-600 transition-colors hover:bg-gray-100 ${FOCUS_RING}`}
+                  onClick={() => setForm((f) => ({ ...f, task: prompt }))}
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-3 rounded-md border border-dashed border-gray-300 bg-gray-50 p-3">
+          <label htmlFor="run-files" className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Upload files (optional)</label>
+          <input
+            id="run-files"
+            type="file"
+            multiple
+            className="block w-full text-sm text-gray-700 file:mr-3 file:rounded-md file:border file:border-gray-300 file:bg-white file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-gray-700 hover:file:bg-gray-50"
+            onChange={(e) => setSelectedFiles(Array.from(e.target.files ?? []))}
+          />
+          {selectedFiles.length > 0 ? (
+            <p className="mt-2 text-xs text-gray-500">
+              <Chip>{selectedFiles.length} file{selectedFiles.length === 1 ? '' : 's'} selected</Chip>
+            </p>
+          ) : null}
+        </div>
+
+        <ErrorBanner className="mt-3" title="Couldn't create run" message={createRun.error ? (createRun.error as Error).message : undefined} />
+      </Modal>
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import React from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import {
   IconChevronDown,
   IconGitBranch,
@@ -11,9 +11,7 @@ import {
   IconClock,
   IconPlayerPlay,
   IconDatabase,
-  IconSearch,
   IconCopy,
-  IconX,
   IconArrowUpRight,
   IconArrowDownLeft,
 } from '@tabler/icons-react'
@@ -21,10 +19,25 @@ import { api } from '../lib/api'
 import type { Artifact, LLMRequestSnapshot, TraceSpan } from '../lib/types'
 import { queryKeys } from '../lib/queryKeys'
 import { formatDuration, parseJSONStringRecord, parseTimeMs, prettyJSON, tryParseJSON } from '../lib/time'
+import { QueryErrorState, StatusBadge } from '../components/Common'
+import { Button } from '../components/ui/Button'
+import { Chip } from '../components/ui/Chip'
+import { Modal } from '../components/ui/Modal'
+import { Tabs, type TabItem } from '../components/ui/Tabs'
+import { ACTOR_COLORS, FOCUS_RING } from '../lib/tokens'
 
 import { formatDistanceToNow } from 'date-fns'
 
 type TabId = 'transcript' | 'debug' | 'events' | 'artifacts'
+
+const RUN_DETAIL_TABS: TabItem[] = [
+  { id: 'transcript', label: 'Transcript' },
+  { id: 'debug', label: 'Debug' },
+  { id: 'events', label: 'All events' },
+  { id: 'artifacts', label: 'Artifacts' },
+]
+
+const SCROLL_SNAP_WINDOW_MS = 2000
 
 type EventRow = {
   id: string
@@ -265,7 +278,7 @@ export function RunDetailPage() {
       if (!placed) rows.push([span])
     }
     return rows
-  }, [timeline, spans])
+  }, [timeline])
 
   const metrics = useMemo(() => {
     const run = runQ.data
@@ -365,29 +378,27 @@ export function RunDetailPage() {
       <div className="border-b border-gray-200 bg-white px-4 py-3 sm:px-6 sm:py-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
-            <div className="mb-1.5 flex items-center gap-2 text-sm text-gray-500">
-            <span className="hover:text-gray-700 transition-colors">Runs</span>
-            <span className="text-gray-300">/</span>
-            <span className="truncate font-medium text-gray-600 hover:text-gray-700 transition-colors">
-              {id}
-            </span>
-          </div>
+            <nav aria-label="Breadcrumb" className="mb-1.5 flex items-center gap-2 text-sm text-gray-500">
+              <Link to="/runs" className={`rounded transition-colors hover:text-gray-700 ${FOCUS_RING}`}>Runs</Link>
+              <span className="text-gray-300" aria-hidden="true">/</span>
+              <span className="truncate font-medium text-gray-600">{id}</span>
+            </nav>
             <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="min-w-0 flex-1 text-lg font-semibold tracking-tight text-gray-900 sm:text-xl">
                 {taskTitle}
               </h1>
-              <span className="shrink-0 rounded border border-gray-200 bg-gray-100 px-2 py-0.5 text-[11px] font-medium capitalize text-gray-600 shadow-sm">
-              {statusLabel}
-              </span>
+              <StatusBadge status={statusLabel} />
             </div>
           </div>
           <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
-            <input 
-              type="text" 
+            <label htmlFor="run-steer" className="sr-only">Message agent</label>
+            <input
+              id="run-steer"
+              type="text"
               value={steerText}
               onChange={(e) => setSteerText(e.target.value)}
-              placeholder="Message agent..." 
-              className="h-9 min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 text-sm shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 lg:w-80 lg:flex-none"
+              placeholder="Message agent..."
+              className={`h-9 min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-3 text-sm shadow-sm transition-colors focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 lg:w-80 lg:flex-none ${FOCUS_RING}`}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
@@ -395,87 +406,64 @@ export function RunDetailPage() {
                 }
               }}
             />
-            <button
-              type="button"
-              className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-50"
+            <Button
+              size="sm"
+              variant="secondary"
               onClick={() => void sendSteeringMessage()}
               disabled={!steerText.trim() || steer.isPending}
+              trailingIcon={<IconArrowUpRight size={14} className="text-gray-400" />}
             >
-            {steer.isPending ? 'Sending...' : 'Send'}
-            <IconArrowUpRight size={14} className="text-gray-400" />
-            </button>
-            {steerError ? <p className="w-full text-xs text-red-600">{steerError}</p> : null}
+              {steer.isPending ? 'Sending…' : 'Send'}
+            </Button>
+            {steerError ? <p className="w-full text-xs text-red-600" role="alert">{steerError}</p> : null}
           </div>
         </div>
       </div>
 
       {/* Tags row */}
-      <div className="flex flex-wrap items-center gap-3 px-6 py-3 border-b border-gray-200 bg-[#fafafa]/50 text-xs text-gray-600">
-        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-gray-200 bg-white shadow-sm font-medium">
-          <IconGitBranch size={14} className="text-gray-400" /> {agentQ.data?.name || runQ.data?.agent_id || 'default-agent'}
+      <div className="flex flex-wrap items-center gap-3 border-b border-gray-200 bg-[#fafafa]/50 px-6 py-3 text-xs text-gray-600">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 font-medium shadow-sm">
+            <IconGitBranch size={14} className="text-gray-400" /> {agentQ.data?.name || runQ.data?.agent_id || 'default-agent'}
+          </div>
+          <div className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 font-medium shadow-sm">
+            <IconCloud size={14} className="text-gray-400" /> {environmentLabel}
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsArtifactsModalOpen(true)}
+            className={`flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 font-medium shadow-sm transition-colors hover:bg-gray-50 ${FOCUS_RING}`}
+          >
+            <IconFile size={14} className="text-gray-400" /> {displayArtifacts.length} {displayArtifacts.length === 1 ? 'file' : 'files'}
+          </button>
+          <div className="flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 font-medium text-gray-500 shadow-sm">
+            <IconLock size={14} className="text-gray-400" /> {vaultLabel}
+          </div>
         </div>
-        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-gray-200 bg-white shadow-sm font-medium">
-          <IconCloud size={14} className="text-gray-400" /> {environmentLabel}
-        </div>
-        <button 
-          onClick={() => setIsArtifactsModalOpen(true)}
-          className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-gray-200 bg-white shadow-sm font-medium hover:bg-gray-50 transition-colors"
-        >
-          <IconFile size={14} className="text-gray-400" /> {displayArtifacts.length} {displayArtifacts.length === 1 ? 'file' : 'files'}
-        </button>
-        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-gray-200 bg-white shadow-sm font-medium text-gray-500">
-          <IconLock size={14} className="text-gray-400" /> {vaultLabel}
-        </div>
-        
-        <div className="flex items-center gap-1.5 text-gray-500 ml-4 font-medium">
-          <IconClock size={14} /> {runQ.data?.created_at ? formatDistanceToNow(new Date(runQ.data.created_at), { addSuffix: true }) : 'Just now'}
-        </div>
-        <div className="flex items-center gap-1.5 text-gray-500 ml-2 font-medium">
-          <IconPlayerPlay size={14} /> {metrics.elapsedLabel}
-        </div>
-        <div className="flex items-center gap-1.5 text-gray-500 ml-2 font-medium">
-          <IconDatabase size={14} /> {(metrics.inTokens / 1000).toFixed(1)}k / {(metrics.outTokens / 1000).toFixed(1)}k ({metrics.inTokens + metrics.outTokens > 0 ? Math.round((metrics.outTokens / (metrics.inTokens + metrics.outTokens)) * 100) : 0}%)
+        <div className="flex flex-wrap items-center gap-4 font-medium text-gray-500">
+          <span className="flex items-center gap-1.5">
+            <IconClock size={14} /> {runQ.data?.created_at ? formatDistanceToNow(new Date(runQ.data.created_at), { addSuffix: true }) : 'Just now'}
+          </span>
+          <span className="flex items-center gap-1.5">
+            <IconPlayerPlay size={14} /> {metrics.elapsedLabel}
+          </span>
+          <span className="flex items-center gap-1.5">
+            <IconDatabase size={14} /> {(metrics.inTokens / 1000).toFixed(1)}k / {(metrics.outTokens / 1000).toFixed(1)}k ({metrics.inTokens + metrics.outTokens > 0 ? Math.round((metrics.outTokens / (metrics.inTokens + metrics.outTokens)) * 100) : 0}%)
+          </span>
         </div>
       </div>
+
+      {runQ.isError || telemetryQ.isError ? (
+        <div className="px-6 py-3">
+          <QueryErrorState title="Couldn't load run" query={runQ.isError ? runQ : telemetryQ} />
+        </div>
+      ) : null}
 
       {/* Main content body */}
       <div className="flex-1 overflow-auto bg-[#fafafa]">
         {/* Tabs */}
-        <div className="flex items-center justify-between border-b border-gray-200 px-6 bg-[#fafafa] pt-3 sticky top-0 z-10">
-          <div className="flex items-center gap-6">
-            <button
-              onClick={() => setActiveTab('transcript')}
-              className={`pb-2 text-sm font-medium transition-colors ${activeTab === 'transcript' ? 'text-gray-900 border-b-[3px] border-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-            >
-              Transcript
-            </button>
-            <button
-              onClick={() => setActiveTab('debug')}
-              className={`pb-2 text-sm font-medium transition-colors ${activeTab === 'debug' ? 'text-gray-900 border-b-[3px] border-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-            >
-              Debug
-            </button>
-            <button
-              onClick={() => setActiveTab('events')}
-              className={`pb-2 text-sm font-medium transition-colors flex items-center gap-1 ${activeTab === 'events' ? 'text-gray-900 border-b-[3px] border-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-            >
-              All events <IconChevronDown size={14} />
-            </button>
-            <button
-              onClick={() => setActiveTab('artifacts')}
-              className={`pb-2 text-sm font-medium transition-colors flex items-center gap-1 ${activeTab === 'artifacts' ? 'text-gray-900 border-b-[3px] border-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
-            >
-              Artifacts
-            </button>
-            <div className="relative pb-2 group">
-               <IconSearch size={16} className="text-gray-400 group-hover:text-gray-600 transition-colors cursor-pointer" />
-            </div>
-          </div>
-          <div className="flex items-center gap-4 pb-2">
-            <button className="flex items-center gap-1 text-xs font-medium text-gray-500 hover:text-gray-800 transition-colors">
-              <IconCopy size={14} /> Copy all
-            </button>
-          </div>
+        <div className="sticky top-0 z-10 border-b border-gray-200 bg-[#fafafa] px-6 pt-3">
+          <Tabs tabs={RUN_DETAIL_TABS} value={activeTab} onChange={(next) => setActiveTab(next as TabId)} />
         </div>
 
         <div className={`p-6 mx-auto ${activeTab === 'transcript' ? 'max-w-6xl' : activeTab === 'events' ? 'max-w-none' : 'max-w-5xl'}`}>
@@ -494,21 +482,21 @@ export function RunDetailPage() {
                   <div className="flex items-center gap-3 text-[11px] text-gray-500">
                     {(timelineMeta?.orchestrator ?? 0) > 0 ? (
                       <span className="inline-flex items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-sm bg-[#60A5FA]" />
+                        <span className="h-2 w-2 rounded-[2px]" style={{ backgroundColor: ACTOR_COLORS.orchestrator }} />
                         <span className="tabular-nums">{timelineMeta?.orchestrator}</span>
                         <span className="text-gray-400">orch</span>
                       </span>
                     ) : null}
                     {(timelineMeta?.tools ?? 0) > 0 ? (
                       <span className="inline-flex items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-sm bg-[#F472B6]" />
+                        <span className="h-2 w-2 rounded-[2px]" style={{ backgroundColor: ACTOR_COLORS.tool }} />
                         <span className="tabular-nums">{timelineMeta?.tools}</span>
                         <span className="text-gray-400">tool</span>
                       </span>
                     ) : null}
                     {(timelineMeta?.system ?? 0) > 0 ? (
                       <span className="inline-flex items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-sm bg-gray-300" />
+                        <span className="h-2 w-2 rounded-[2px]" style={{ backgroundColor: ACTOR_COLORS.system }} />
                         <span className="tabular-nums">{timelineMeta?.system}</span>
                         <span className="text-gray-400">sys</span>
                       </span>
@@ -524,22 +512,23 @@ export function RunDetailPage() {
                             const start = ((span.__start - timeline.min) / timeline.total) * 100
                             const spanMs = Math.max(0, (span.__end || span.__start) - span.__start)
                             const width = Math.max(0.3, (spanMs / timeline.total) * 100)
-                            const bg = span.__actor === 'tools'
-                              ? 'bg-[#F472B6] hover:opacity-100'
+                            const bgColor = span.__actor === 'tools'
+                              ? ACTOR_COLORS.tool
                               : span.__actor === 'orchestrator'
-                                ? 'bg-[#60A5FA] hover:opacity-100'
-                                : 'bg-gray-300 hover:opacity-100'
+                                ? ACTOR_COLORS.orchestrator
+                                : ACTOR_COLORS.system
                             return (
                               <button
                                 type="button"
                                 key={span.id}
-                                className={`group absolute top-0 h-5 rounded-[2px] ${bg} cursor-pointer opacity-80 transition-opacity`}
-                                style={{ left: `${start}%`, width: `${width}%` }}
+                                className={`group absolute top-0 h-5 cursor-pointer rounded-[2px] opacity-80 transition-opacity hover:opacity-100 focus-visible:opacity-100 ${FOCUS_RING}`}
+                                style={{ left: `${start}%`, width: `${width}%`, backgroundColor: bgColor }}
                                 aria-label={`${span.name}, ${formatDuration(spanMs)}, ${span.__actor}`}
-                                onMouseMove={(ev) => {
+                                onMouseEnter={(ev) => {
+                                  const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect()
                                   setTimelineTooltip({
-                                    x: ev.clientX,
-                                    y: ev.clientY,
+                                    x: rect.left + rect.width / 2,
+                                    y: rect.top,
                                     name: span.name,
                                     duration: formatDuration(spanMs),
                                     actor: span.__actor,
@@ -566,7 +555,7 @@ export function RunDetailPage() {
                                     const dist = Math.abs(evMs - targetMs)
                                     if (!best || dist < best.dist) best = { id: ev.id, dist }
                                   }
-                                  if (best && best.dist < 2000) {
+                                  if (best && best.dist < SCROLL_SNAP_WINDOW_MS) {
                                     const el = document.getElementById(`run-event-${best.id}`)
                                     if (el) {
                                       el.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -581,13 +570,15 @@ export function RunDetailPage() {
                       ))}
                     </div>
                   ) : (
-                    <div className="h-5 w-full rounded-sm bg-gray-50" />
+                    <div className="flex h-5 w-full items-center justify-center rounded-sm bg-gray-50 text-[11px] text-gray-400">
+                      Waiting for spans…
+                    </div>
                   )}
                   <div className="mt-2 flex h-3 w-full items-start justify-between border-t border-gray-100 pt-1 text-[10px] tabular-nums text-gray-400">
                     {[0, 0.25, 0.5, 0.75, 1].map((frac) => (
                       <span
                         key={frac}
-                        className={frac === 0 ? 'text-left' : frac === 1 ? 'text-right' : 'text-center'}
+                        className={`px-0.5 ${frac === 0 ? 'text-left' : frac === 1 ? 'text-right' : 'text-center'}`}
                       >
                         {formatDuration(Math.round((timeline?.total ?? 0) * frac))}
                       </span>
@@ -597,8 +588,11 @@ export function RunDetailPage() {
               </div>
               {timelineTooltip ? (
                 <div
-                  className="pointer-events-none fixed z-50 max-w-xs rounded-md bg-gray-900 px-2.5 py-1.5 text-[11px] leading-tight text-white shadow-lg"
-                  style={{ left: timelineTooltip.x + 12, top: timelineTooltip.y + 16 }}
+                  className="pointer-events-none fixed z-50 max-w-xs -translate-x-1/2 -translate-y-full rounded-md bg-gray-900 px-2.5 py-1.5 text-[11px] leading-tight text-white shadow-lg"
+                  style={{
+                    left: Math.min(Math.max(timelineTooltip.x, 80), window.innerWidth - 80),
+                    top: Math.max(timelineTooltip.y - 8, 32),
+                  }}
                 >
                   <div className="font-medium">{timelineTooltip.name}</div>
                   <div className="mt-0.5 flex items-center gap-1.5 text-gray-300">
@@ -609,9 +603,9 @@ export function RunDetailPage() {
                 </div>
               ) : null}
 
-              {/* Agent Tabs */}
-              <div className="flex items-center gap-6 border-b border-gray-200 mb-6 max-w-5xl mx-auto">
-                <button className="text-sm font-medium text-gray-900 border-b-[3px] border-gray-900 pb-2 -mb-[1.5px]">Orchestrator</button>
+              {/* Agent lane heading */}
+              <div className="mx-auto mb-6 flex max-w-5xl items-center gap-6 border-b border-gray-200">
+                <span className="-mb-px border-b-2 border-gray-900 pb-2 text-sm font-medium text-gray-900">Orchestrator</span>
               </div>
 
               {/* Transcript List */}
@@ -696,7 +690,7 @@ export function RunDetailPage() {
                       <IconChevronDown size={14} className="group-open:-rotate-180 transition-transform" />
                       View Raw Run Object
                     </summary>
-                    <pre className="max-h-64 overflow-auto rounded-lg bg-gray-900 p-4 font-mono text-[11px] text-gray-100 mt-3 shadow-inner">{JSON.stringify(runQ.data, null, 2)}</pre>
+                    <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-gray-900 p-4 font-mono text-[11px] text-gray-100">{JSON.stringify(runQ.data, null, 2)}</pre>
                   </details>
                 </div>
 
@@ -713,21 +707,11 @@ export function RunDetailPage() {
                         <summary className="cursor-pointer list-none">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-700">
-                                Step {row.idx}
-                              </span>
-                              <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-mono text-gray-700">
-                                {row.model}
-                              </span>
-                              <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
-                                {row.messageCount} msgs
-                              </span>
-                              <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
-                                {row.toolCount} tools
-                              </span>
-                              <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
-                                system {row.systemPromptLength} chars
-                              </span>
+                              <Chip>Step {row.idx}</Chip>
+                              <Chip className="font-mono">{row.model}</Chip>
+                              <Chip>{row.messageCount} msgs</Chip>
+                              <Chip>{row.toolCount} tools</Chip>
+                              <Chip>system {row.systemPromptLength} chars</Chip>
                             </div>
                             <div className="flex items-center gap-2 text-[11px] text-gray-500">
                               {row.inputTokens > 0 || row.outputTokens > 0 ? (
@@ -739,10 +723,10 @@ export function RunDetailPage() {
                         </summary>
                         <div className="mt-3 space-y-3 border-t border-gray-100 pt-3">
                           <div className="flex flex-wrap gap-2 text-[11px] text-gray-600">
-                            <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5">user {row.userMessages}</span>
-                            <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5">assistant {row.assistantMessages}</span>
-                            <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5">tool {row.toolMessages}</span>
-                            <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5">system {row.systemMessages}</span>
+                            <Chip>user {row.userMessages}</Chip>
+                            <Chip>assistant {row.assistantMessages}</Chip>
+                            <Chip>tool {row.toolMessages}</Chip>
+                            <Chip>system {row.systemMessages}</Chip>
                           </div>
                           {row.toolNames.length > 0 ? (
                             <p className="text-[11px] text-gray-600">
@@ -806,9 +790,7 @@ export function RunDetailPage() {
                             <td className="px-5 py-3 font-mono text-xs text-gray-600">{s.id}</td>
                             <td className="px-5 py-3 font-medium text-gray-700">{s.step_type}</td>
                             <td className="px-5 py-3">
-                              <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium capitalize ${s.status === 'completed' ? 'bg-green-50 text-green-700 border border-green-200' : s.status === 'failed' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-gray-100 text-gray-700 border border-gray-200'}`}>
-                                {s.status}
-                              </span>
+                              <StatusBadge status={s.status} />
                             </td>
                             <td className="px-5 py-3 text-gray-500 font-mono text-xs">{formatDuration(stepDurationByID[s.id] || 0)}</td>
                           </tr>
@@ -843,9 +825,7 @@ export function RunDetailPage() {
                                <td className="px-5 py-3 font-medium text-gray-900">{tc.tool_name}</td>
                                <td className="px-5 py-3 font-mono text-xs text-gray-500">{tc.step_id}</td>
                                <td className="px-5 py-3">
-                                 <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium capitalize ${tc.status === 'completed' ? 'bg-green-50 text-green-700 border border-green-200' : tc.status === 'failed' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-gray-100 text-gray-700 border border-gray-200'}`}>
-                                   {tc.status}
-                                 </span>
+                                 <StatusBadge status={tc.status} />
                                </td>
                                <td className="px-5 py-3 text-gray-500 font-mono text-xs">{formatDuration(Number.isFinite(dur) && dur > 0 ? dur : 0)}</td>
                              </tr>
@@ -903,7 +883,7 @@ export function RunDetailPage() {
                                <td colSpan={6} className="px-4 pb-4 pt-1 bg-gray-50 border-b border-gray-100">
                                  <div className="ml-8 border-l-2 border-gray-200 pl-4">
                                    <p className="text-[11px] text-gray-500 mb-2">Created at {new Date(ev.created_at).toLocaleString()}</p>
-                                   <pre className="max-h-64 overflow-auto rounded bg-gray-900 p-3 font-mono text-[11px] text-gray-100 shadow-inner whitespace-pre-wrap">{JSON.stringify(ev.parsed, null, 2)}</pre>
+                                   <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded bg-gray-900 p-3 font-mono text-[11px] text-gray-100">{JSON.stringify(ev.parsed, null, 2)}</pre>
                                  </div>
                                </td>
                              </tr>
@@ -948,39 +928,26 @@ export function RunDetailPage() {
         </div>
       </div>
 
-      {isArtifactsModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[80vh] flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4 bg-gray-50/80">
-              <div className="flex items-center gap-2">
-                <IconFile size={18} className="text-gray-500" />
-                <h2 className="text-lg font-semibold text-gray-900">Run Artifacts <span className="text-gray-500 font-normal text-sm ml-1">({displayArtifacts.length})</span></h2>
-              </div>
-              <button 
-                onClick={() => setIsArtifactsModalOpen(false)} 
-                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-1.5 rounded-md transition-colors"
-              >
-                <IconX size={20} />
-              </button>
-            </div>
-            <div className="p-6 overflow-auto bg-gray-50/30">
-              {displayArtifacts.length === 0 ? (
-                <div className="text-center text-gray-500 py-12 flex flex-col items-center justify-center">
-                  <IconFile size={48} className="text-gray-300 mb-4" />
-                  <p className="text-base font-medium text-gray-900 mb-1">No artifacts found</p>
-                  <p className="text-sm">This session hasn't generated any files or logs yet.</p>
-                </div>
-              ) : (
-                <div className="grid gap-4 md:grid-cols-2">
-                  {displayArtifacts.map((artifact) => (
-                    <StepArtifactCard key={artifact.id} runID={id} artifact={artifact} />
-                  ))}
-                </div>
-              )}
-            </div>
+      <Modal
+        open={isArtifactsModalOpen}
+        onClose={() => setIsArtifactsModalOpen(false)}
+        title={<span className="flex items-center gap-2"><IconFile size={18} className="text-gray-500" />Run Artifacts <span className="ml-1 text-sm font-normal text-gray-500">({displayArtifacts.length})</span></span>}
+        widthClass="max-w-4xl"
+      >
+        {displayArtifacts.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center text-gray-500">
+            <IconFile size={48} className="mb-4 text-gray-300" />
+            <p className="mb-1 text-base font-medium text-gray-900">No artifacts found</p>
+            <p className="text-sm">This session hasn't generated any files or logs yet.</p>
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            {displayArtifacts.map((artifact) => (
+              <StepArtifactCard key={artifact.id} runID={id} artifact={artifact} />
+            ))}
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

@@ -3,10 +3,18 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { IconPencil, IconSparkles, IconTrash } from '@tabler/icons-react'
 import { api } from '../lib/api'
-import { Card, EmptyState, LoadingState, QueryErrorState, SectionTitle } from '../components/Common'
+import { Card, EmptyState, ErrorBanner, LoadingState, QueryErrorState, SectionTitle } from '../components/Common'
+import { Button } from '../components/ui/Button'
+import { Modal } from '../components/ui/Modal'
+import { Chip } from '../components/ui/Chip'
+import { FOCUS_RING } from '../lib/tokens'
 import { queryKeys } from '../lib/queryKeys'
 import { ProviderModelCombobox } from '../components/ProviderModelCombobox'
 import { ToolSelectorAccordion } from '../components/ToolSelectorAccordion'
+
+const INPUT_CLASSES = `h-9 rounded-md border border-gray-300 bg-white px-3 text-sm transition-colors focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 ${FOCUS_RING}`
+const TEXTAREA_CLASSES = `rounded-md border border-gray-300 bg-white px-3 py-2 text-sm transition-colors focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 ${FOCUS_RING}`
+
 import {
   parseAgentConfigText,
   parseStarterPrompts,
@@ -283,13 +291,7 @@ export function AgentsPage() {
             <h3 className="text-sm font-semibold tracking-tight text-gray-900">Create Agent</h3>
             <p className="mt-1 text-xs text-gray-500">Start from a template or describe what you need.</p>
           </div>
-          <button
-            className="h-9 rounded-md bg-gray-900 px-4 text-sm font-medium text-white transition-colors hover:bg-gray-800"
-            onClick={() => setIsCreateOpen(true)}
-            type="button"
-          >
-            New Agent
-          </button>
+          <Button onClick={() => setIsCreateOpen(true)}>New Agent</Button>
         </div>
       </Card>
 
@@ -298,19 +300,30 @@ export function AgentsPage() {
         <QueryErrorState title="Failed to load agents" query={agents} />
         <QueryErrorState title="Failed to load tools" query={toolsQ} />
         <QueryErrorState title="Failed to load providers" query={providersQ} />
-        {agents.isLoading ? <LoadingState label="Loading agents..." /> : null}
-        {deleteError ? (
-          <p className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{deleteError}</p>
-        ) : null}
+        {agents.isLoading ? <LoadingState label="Loading agents…" /> : null}
+        <ErrorBanner className="mb-3" title="Couldn't delete agent" message={deleteError} />
         {!agents.isLoading && !agents.isError && (agents.data ?? []).length === 0 ? <EmptyState title="No agents" body="Create an agent profile to start runs." /> : (
           <div className="space-y-3">
             {(agents.data ?? []).map((a) => (
-              <div key={a.id} className="group cursor-pointer rounded-lg border border-gray-200 p-4 transition-colors hover:border-gray-300" onClick={() => navigate(`/agents/${a.id}`)}>
+              <div
+                key={a.id}
+                role="button"
+                tabIndex={0}
+                aria-label={`Open agent ${a.name}`}
+                className={`group cursor-pointer rounded-lg border border-gray-200 bg-white p-4 transition-colors hover:border-gray-300 hover:bg-gray-50/60 ${FOCUS_RING}`}
+                onClick={() => navigate(`/agents/${a.id}`)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    navigate(`/agents/${a.id}`)
+                  }
+                }}
+              >
                 {editId === a.id ? (
                   <div className="space-y-3">
                     <div className="grid gap-2">
-                      <input className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
-                      <input className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" value={editForm.description} onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))} />
+                      <input aria-label="Agent name" className={INPUT_CLASSES} value={editForm.name} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))} />
+                      <input aria-label="Agent description" className={INPUT_CLASSES} value={editForm.description} onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))} />
                       <ProviderModelCombobox
                         value={editProviderModelInput}
                         options={providerModelSuggestions}
@@ -324,16 +337,21 @@ export function AgentsPage() {
                       />
                     </div>
                     <div className="relative">
-                      <textarea className="h-24 w-full rounded-md border border-gray-300 bg-white px-3 py-2 pr-28 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" value={editForm.system_prompt} onChange={(e) => setEditForm((f) => ({ ...f, system_prompt: e.target.value }))} />
-                      <button
-                        className="absolute bottom-3 right-3 inline-flex h-7 items-center gap-1 rounded-md border border-gray-200 bg-gray-50 px-2 text-xs font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-100 disabled:opacity-50"
-                        disabled={!editForm.provider || enhanceEditPrompt.isPending}
-                        onClick={() => enhanceEditPrompt.mutate()}
-                        type="button"
-                      >
-                        <IconSparkles className="h-3.5 w-3.5" />
-                        {enhanceEditPrompt.isPending ? 'Enhancing...' : 'AI Enhance'}
-                      </button>
+                      <textarea aria-label="System prompt" className={`${TEXTAREA_CLASSES} h-24 w-full pr-28`} value={editForm.system_prompt} onChange={(e) => setEditForm((f) => ({ ...f, system_prompt: e.target.value }))} />
+                      <div className="absolute bottom-3 right-3">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={!editForm.provider || enhanceEditPrompt.isPending}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            enhanceEditPrompt.mutate()
+                          }}
+                        >
+                          <IconSparkles className="mr-1 h-3.5 w-3.5" />
+                          {enhanceEditPrompt.isPending ? 'Enhancing…' : 'AI Enhance'}
+                        </Button>
+                      </div>
                     </div>
                     <ToolSelectorAccordion
                       title="Allowed tools"
@@ -342,20 +360,22 @@ export function AgentsPage() {
                       onChange={(next) => setEditForm((f) => ({ ...f, allowed_tools: next }))}
                     />
                     <textarea
-                      className="h-20 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
+                      aria-label="Starter prompts"
+                      className={`${TEXTAREA_CLASSES} h-20 w-full`}
                       placeholder="Starter prompts (one per line)"
                       value={editForm.starter_prompts_text}
                       onChange={(e) => setEditForm((f) => ({ ...f, starter_prompts_text: e.target.value }))}
                     />
                     <textarea
-                      className="h-20 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
+                      aria-label="Default task"
+                      className={`${TEXTAREA_CLASSES} h-20 w-full`}
                       placeholder="Default session task (used when task is blank)"
                       value={editForm.default_task}
                       onChange={(e) => setEditForm((f) => ({ ...f, default_task: e.target.value }))}
                     />
                     <div className="flex gap-2 pt-2">
-                      <button
-                        className="h-8 rounded-md bg-gray-900 px-3 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
+                      <Button
+                        size="sm"
                         disabled={updateAgent.isPending}
                         onClick={() =>
                           updateAgent.mutate({
@@ -376,8 +396,8 @@ export function AgentsPage() {
                         }
                       >
                         Save
-                      </button>
-                      <button className="h-8 rounded-md border border-gray-300 px-3 text-sm transition-colors hover:bg-gray-50" onClick={() => setEditId('')}>Cancel</button>
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => setEditId('')}>Cancel</Button>
                     </div>
                   </div>
                 ) : (
@@ -387,9 +407,9 @@ export function AgentsPage() {
                         <p className="text-sm font-semibold text-gray-900">{a.name}</p>
                         <p className="text-xs text-gray-500 mt-0.5">{a.provider}/{a.model}</p>
                       </div>
-                      <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-1.5 opacity-60 transition-opacity group-hover:opacity-100">
                         <button
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 text-gray-600 transition-colors hover:bg-gray-100"
+                          className={`inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-600 transition-colors hover:bg-gray-100 ${FOCUS_RING}`}
                           onClick={(event) => {
                             event.stopPropagation()
                             setEditId(a.id)
@@ -413,7 +433,7 @@ export function AgentsPage() {
                           <IconPencil className="h-3.5 w-3.5" />
                         </button>
                         <button
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-red-200 text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
+                          className={`inline-flex h-7 w-7 items-center justify-center rounded-md border border-red-200 bg-white text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50 ${FOCUS_RING}`}
                           onClick={async (event) => {
                             event.stopPropagation()
                             const ok = window.confirm(`Delete agent "${a.name}"?`)
@@ -454,14 +474,10 @@ export function AgentsPage() {
                     {(a.starter_prompts ?? []).length > 0 ? (
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {(a.starter_prompts ?? []).slice(0, 3).map((prompt) => (
-                          <span key={prompt} className="inline-flex rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-[11px] text-gray-600">
-                            {prompt}
-                          </span>
+                          <Chip key={prompt}>{prompt}</Chip>
                         ))}
                         {(a.starter_prompts ?? []).length > 3 ? (
-                          <span className="inline-flex rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-[11px] text-gray-500">
-                            +{(a.starter_prompts ?? []).length - 3} more
-                          </span>
+                          <Chip>+{(a.starter_prompts ?? []).length - 3} more</Chip>
                         ) : null}
                       </div>
                     ) : null}
@@ -473,36 +489,55 @@ export function AgentsPage() {
         )}
       </Card>
 
-      {isCreateOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-brightness-75">
-          <div role="dialog" aria-modal="true" className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl border border-gray-200 bg-white p-5 shadow-xl md:p-6">
-            <div className="mb-4 flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-semibold tracking-tight text-gray-900">Create agent</h3>
-                <p className="mt-1 text-sm text-gray-500">Start from a template or describe what you need.</p>
-              </div>
-              <button
-                className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50"
-                onClick={() => setIsCreateOpen(false)}
-                type="button"
-              >
-                Close
-              </button>
-            </div>
-
+      <Modal
+        open={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        eyebrow="Agents"
+        title="Create agent"
+        widthClass="max-w-3xl"
+        footer={
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="secondary" onClick={() => setIsCreateOpen(false)}>Cancel</Button>
+            <Button
+              disabled={providerIDs.length === 0 || !form.provider || !form.model || createAgent.isPending}
+              onClick={() =>
+                createAgent.mutate({
+                  name: form.name,
+                  description: form.description,
+                  provider: form.provider,
+                  model: form.model,
+                  system_prompt: form.system_prompt,
+                  allowed_tools: form.allowed_tools,
+                  starter_prompts: parseStarterPrompts(form.starter_prompts_text),
+                  default_task: form.default_task,
+                  default_max_steps: form.default_max_steps,
+                  default_workspace_path: form.default_workspace_path,
+                })
+              }
+            >
+              {createAgent.isPending ? 'Creating…' : 'Create agent'}
+            </Button>
+          </div>
+        }
+      >
+        <p className="mb-4 text-sm text-gray-500">Start from a template or describe what you need.</p>
             <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-              <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Starting point</p>
-              <div className="mt-2 flex flex-wrap gap-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Starting point</p>
+              <div className="mt-2 flex flex-wrap gap-2" role="tablist" aria-label="Starting point">
                 <button
                   type="button"
-                  className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${createStartingPoint === 'blank' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+                  role="tab"
+                  aria-selected={createStartingPoint === 'blank'}
+                  className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${FOCUS_RING} ${createStartingPoint === 'blank' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
                   onClick={() => setCreateStartingPoint('blank')}
                 >
                   Describe your agent
                 </button>
                 <button
                   type="button"
-                  className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${createStartingPoint === 'template' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
+                  role="tab"
+                  aria-selected={createStartingPoint === 'template'}
+                  className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${FOCUS_RING} ${createStartingPoint === 'template' ? 'border-gray-900 bg-gray-900 text-white' : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'}`}
                   onClick={() => {
                     setCreateStartingPoint('template')
                     applyCreateTemplate(createTemplateKey)
@@ -519,13 +554,14 @@ export function AgentsPage() {
                       <button
                         key={template.key}
                         type="button"
-                        className={`rounded-lg border p-2.5 text-left transition-colors ${active ? 'border-gray-900 bg-white shadow-sm' : 'border-gray-200 bg-white hover:border-gray-300'}`}
+                        aria-pressed={active}
+                        className={`rounded-lg border p-2.5 text-left transition-colors ${FOCUS_RING} ${active ? 'border-gray-900 bg-white shadow-sm' : 'border-gray-200 bg-white hover:border-gray-300'}`}
                         onClick={() => {
                           setCreateTemplateKey(template.key)
                           applyCreateTemplate(template.key)
                         }}
                       >
-                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-900">{template.name}</p>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-900">{template.name}</p>
                         <p className="mt-1 text-xs leading-relaxed text-gray-500">{template.description}</p>
                       </button>
                     )
@@ -534,7 +570,8 @@ export function AgentsPage() {
               ) : (
                 <div className="mt-3">
                   <textarea
-                    className="h-20 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
+                    aria-label="Describe this agent"
+                    className={`${TEXTAREA_CLASSES} h-20 w-full`}
                     placeholder="Describe what this agent should do"
                     value={createDescribeInput}
                     onChange={(e) => setCreateDescribeInput(e.target.value)}
@@ -542,23 +579,29 @@ export function AgentsPage() {
                 </div>
               )}
               <div className="mt-2 flex justify-end">
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-1 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:opacity-50"
+                <Button
+                  size="sm"
+                  variant="secondary"
                   disabled={!createDescribeInput.trim() || generateCreateAgent.isPending || providerIDs.length === 0}
                   onClick={() => generateCreateAgent.mutate()}
                 >
-                  <IconSparkles className="h-3.5 w-3.5" />
+                  <IconSparkles className="mr-1 h-3.5 w-3.5" />
                   {createStartingPoint === 'template'
-                    ? (generateCreateAgent.isPending ? 'Applying...' : 'Apply notes')
-                    : (generateCreateAgent.isPending ? 'Generating...' : 'Generate')}
-                </button>
+                    ? (generateCreateAgent.isPending ? 'Applying…' : 'Apply notes')
+                    : (generateCreateAgent.isPending ? 'Generating…' : 'Generate')}
+                </Button>
               </div>
             </div>
 
             <div className="mt-4 space-y-3">
               <h4 className="text-sm font-semibold tracking-tight text-gray-900">Core settings</h4>
-              <input className="h-9 w-full rounded-md border border-gray-300 bg-white px-3 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" placeholder="Agent name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+              <input
+                aria-label="Agent name"
+                className={`${INPUT_CLASSES} w-full`}
+                placeholder="Agent name"
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              />
               <ProviderModelCombobox
                 value={createProviderModelInput}
                 options={providerModelSuggestions}
@@ -575,10 +618,12 @@ export function AgentsPage() {
             <div className="mt-3 rounded-md border border-gray-200 bg-white p-3">
               <div className="mb-2 flex items-center justify-between">
                 <h4 className="text-sm font-semibold tracking-tight text-gray-900">Agent config</h4>
-                <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5">
+                <div className="inline-flex rounded-md border border-gray-200 bg-gray-50 p-0.5" role="tablist" aria-label="Config format">
                   <button
                     type="button"
-                    className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${createConfigFormat === 'yaml' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    role="tab"
+                    aria-selected={createConfigFormat === 'yaml'}
+                    className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${FOCUS_RING} ${createConfigFormat === 'yaml' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                     onClick={() => {
                       setIsEditingCreateConfig(false)
                       setCreateConfigFormat('yaml')
@@ -588,7 +633,9 @@ export function AgentsPage() {
                   </button>
                   <button
                     type="button"
-                    className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${createConfigFormat === 'json' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    role="tab"
+                    aria-selected={createConfigFormat === 'json'}
+                    className={`rounded px-2 py-1 text-[11px] font-medium transition-colors ${FOCUS_RING} ${createConfigFormat === 'json' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
                     onClick={() => {
                       setIsEditingCreateConfig(false)
                       setCreateConfigFormat('json')
@@ -599,7 +646,8 @@ export function AgentsPage() {
                 </div>
               </div>
               <textarea
-                className="h-56 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs leading-relaxed text-gray-700 focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
+                aria-label="Agent config"
+                className={`h-56 w-full rounded-md border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs leading-relaxed text-gray-700 transition-colors focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 ${FOCUS_RING}`}
                 value={createConfigText}
                 onFocus={() => setIsEditingCreateConfig(true)}
                 onBlur={() => {
@@ -613,7 +661,7 @@ export function AgentsPage() {
                 }}
                 spellCheck={false}
               />
-              {createConfigError ? <p className="mt-2 text-xs text-red-600">{createConfigError}</p> : null}
+              {createConfigError ? <p className="mt-2 text-xs text-red-600" role="alert">{createConfigError}</p> : null}
             </div>
 
             <ToolSelectorAccordion
@@ -624,42 +672,9 @@ export function AgentsPage() {
             />
 
             {providerIDs.length === 0 ? <p className="mt-3 text-xs text-gray-500">No providers are configured. Set provider API keys and restart.</p> : null}
-            {generateCreateAgent.error ? <p className="mt-2 text-sm text-red-600">{String(generateCreateAgent.error)}</p> : null}
-            {createAgent.error ? <p className="mt-2 text-sm text-red-600">{String(createAgent.error)}</p> : null}
-
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                className="h-9 rounded-md border border-gray-300 px-3 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
-                onClick={() => setIsCreateOpen(false)}
-                type="button"
-              >
-                Cancel
-              </button>
-              <button
-                className="h-9 rounded-md bg-gray-900 px-4 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:opacity-50"
-                disabled={providerIDs.length === 0 || !form.provider || !form.model || createAgent.isPending}
-                onClick={() =>
-                  createAgent.mutate({
-                    name: form.name,
-                    description: form.description,
-                    provider: form.provider,
-                    model: form.model,
-                    system_prompt: form.system_prompt,
-                    allowed_tools: form.allowed_tools,
-                    starter_prompts: parseStarterPrompts(form.starter_prompts_text),
-                    default_task: form.default_task,
-                    default_max_steps: form.default_max_steps,
-                    default_workspace_path: form.default_workspace_path,
-                  })
-                }
-                type="button"
-              >
-                {createAgent.isPending ? 'Creating...' : 'Create agent'}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
+            <ErrorBanner className="mt-3" title="Couldn't generate agent" message={generateCreateAgent.error ? (generateCreateAgent.error as Error).message : undefined} />
+            <ErrorBanner className="mt-3" title="Couldn't create agent" message={createAgent.error ? (createAgent.error as Error).message : undefined} />
+      </Modal>
     </div>
   )
 }

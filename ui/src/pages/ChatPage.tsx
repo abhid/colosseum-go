@@ -2,7 +2,11 @@ import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/rea
 import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { IconExternalLink } from '@tabler/icons-react'
-import { LoadingState, QueryErrorState } from '../components/Common'
+import { ErrorBanner, LoadingState, QueryErrorState } from '../components/Common'
+import { Button } from '../components/ui/Button'
+import { Chip } from '../components/ui/Chip'
+import { Modal } from '../components/ui/Modal'
+import { FOCUS_RING } from '../lib/tokens'
 import { api } from '../lib/api'
 import { queryKeys } from '../lib/queryKeys'
 import type { Artifact } from '../lib/types'
@@ -350,13 +354,9 @@ export function ChatPage() {
           <h2 className="text-xl font-semibold tracking-tight text-gray-900">Chat</h2>
           <p className="mt-1 text-sm text-gray-500">Session-native chat with run-level traceability and controls.</p>
         </div>
-        <button
-          type="button"
-          onClick={startNewChat}
-          className="rounded border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-        >
+        <Button size="sm" variant="secondary" onClick={startNewChat}>
           New chat
-        </button>
+        </Button>
       </div>
       <div className="min-h-0 flex-1">
         <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
@@ -372,29 +372,33 @@ export function ChatPage() {
               {selectedSession ? (
                 <div className="flex items-center gap-2">
                   {isRenaming ? (
-                    <input
-                      className="h-7 w-44 rounded border border-gray-300 px-2 text-xs"
-                      value={renameValue}
-                      onChange={(event) => setRenameValue(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault()
-                          const next = renameValue.trim()
-                          if (!next) return
-                          patchSession.mutate({ title: next }, { onSuccess: () => setIsRenaming(false) })
-                        }
-                        if (event.key === 'Escape') {
-                          event.preventDefault()
-                          setIsRenaming(false)
-                          setRenameValue('')
-                        }
-                      }}
-                    />
+                    <>
+                      <label htmlFor="session-rename" className="sr-only">Rename session</label>
+                      <input
+                        id="session-rename"
+                        className={`h-8 w-44 rounded-md border border-gray-300 bg-white px-2 text-xs transition-colors focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 ${FOCUS_RING}`}
+                        value={renameValue}
+                        onChange={(event) => setRenameValue(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault()
+                            const next = renameValue.trim()
+                            if (!next) return
+                            patchSession.mutate({ title: next }, { onSuccess: () => setIsRenaming(false) })
+                          }
+                          if (event.key === 'Escape') {
+                            event.preventDefault()
+                            setIsRenaming(false)
+                            setRenameValue('')
+                          }
+                        }}
+                      />
+                    </>
                   ) : null}
-                  <div className="inline-flex overflow-hidden rounded-md border border-gray-300 bg-white text-xs text-gray-700">
-                    <button
-                      type="button"
-                      className="px-2 py-1 hover:bg-gray-50"
+                  <div className="inline-flex items-center gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="secondary"
                       onClick={() => {
                         if (isRenaming) {
                           const next = renameValue.trim()
@@ -407,48 +411,48 @@ export function ChatPage() {
                       }}
                     >
                       {isRenaming ? 'Save' : 'Rename'}
-                    </button>
+                    </Button>
                     {isRenaming ? (
-                      <button
-                        type="button"
-                        className="border-l border-gray-300 px-2 py-1 hover:bg-gray-50"
+                      <Button
+                        size="sm"
+                        variant="secondary"
                         onClick={() => {
                           setIsRenaming(false)
                           setRenameValue('')
                         }}
                       >
                         Cancel
-                      </button>
+                      </Button>
                     ) : null}
-                    <button
-                      type="button"
-                      className="border-l border-gray-300 px-2 py-1 hover:bg-gray-50"
+                    <Button
+                      size="sm"
+                      variant="secondary"
                       onClick={() => setIsInspectorOpen(true)}
                       disabled={!streamRunID}
                       title={streamRunID ? 'Inspect packed session context' : 'Send a message first to build context'}
                     >
                       Context
-                    </button>
-                    <button
-                      type="button"
-                      className="border-l border-gray-300 px-2 py-1 hover:bg-gray-50"
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
                       onClick={() => patchSession.mutate({ pinned: !selectedSession.pinned_at })}
                     >
                       {selectedSession.pinned_at ? 'Unpin' : 'Pin'}
-                    </button>
-                    <button
-                      type="button"
-                      className="border-l border-gray-300 px-2 py-1 hover:bg-gray-50"
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
                       onClick={() => patchSession.mutate({ archived: !selectedSession.archived_at })}
                     >
                       {selectedSession.archived_at ? 'Unarchive' : 'Archive'}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ) : null}
             </div>
 
-            {messagesQ.isLoading && activeSession ? <LoadingState label="Loading transcript..." /> : null}
+            {messagesQ.isLoading && activeSession ? <LoadingState label="Loading transcript…" /> : null}
             <QueryErrorState title="Failed to load messages" query={messagesQ} />
 
             <div
@@ -466,10 +470,11 @@ export function ChatPage() {
                 <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-gray-300 bg-gray-50 px-6">
                   <div className="w-full max-w-2xl space-y-4">
                     <div>
-                      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-gray-500">Resume a chat session</p>
+                      <label htmlFor="session-search" className="mb-2 block text-[11px] font-semibold uppercase tracking-wide text-gray-500">Resume a chat session</label>
                       <input
-                        className="h-8 w-full rounded-md border border-gray-300 bg-white px-2.5 text-xs focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
-                        placeholder="Search chat sessions..."
+                        id="session-search"
+                        className={`h-8 w-full rounded-md border border-gray-300 bg-white px-2.5 text-xs transition-colors focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 ${FOCUS_RING}`}
+                        placeholder="Search chat sessions…"
                         value={sessionSearch}
                         onChange={(event) => setSessionSearch(event.target.value)}
                       />
@@ -479,7 +484,7 @@ export function ChatPage() {
                             key={session.id}
                             type="button"
                             onClick={() => selectSession(session.id)}
-                            className="shrink-0 rounded-md border border-gray-200 bg-white px-2 py-0.5 text-left text-[11px] leading-tight text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900"
+                            className={`shrink-0 rounded-md border border-gray-200 bg-white px-2 py-0.5 text-left text-[11px] leading-tight text-gray-600 transition-colors hover:bg-gray-50 hover:text-gray-900 ${FOCUS_RING}`}
                             title={session.title}
                           >
                             <p className="max-w-[220px] truncate font-medium">{session.title}</p>
@@ -517,7 +522,7 @@ export function ChatPage() {
                         {msg.run_id ? (
                           <Link
                             to={`/runs/${msg.run_id}`}
-                            className="inline-flex items-center rounded border border-gray-200 bg-white p-1 text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+                            className={`inline-flex items-center rounded-md border border-gray-200 bg-white p-1 text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-700 ${FOCUS_RING}`}
                             title="Open run details"
                             aria-label="Open run details"
                           >
@@ -527,7 +532,7 @@ export function ChatPage() {
                         {msg.role === 'thinking' ? (
                           <button
                             type="button"
-                            className="rounded border border-violet-200 bg-white px-2 py-0.5 text-[11px] text-violet-800 hover:bg-violet-100"
+                            className={`rounded-md border border-violet-200 bg-white px-2 py-0.5 text-[11px] text-violet-800 transition-colors hover:bg-violet-100 ${FOCUS_RING}`}
                             onClick={() => setExpandedThinkingByID((prev) => ({ ...prev, [msg.id]: !prev[msg.id] }))}
                           >
                             {expandedThinkingByID[msg.id] ? 'Hide details' : 'Show details'}
@@ -561,13 +566,13 @@ export function ChatPage() {
                       })()}
                       {msg.role === 'system' && msg.run_id && isApprovalMessage(msg) ? (
                         <div className="mt-2 flex items-center gap-1">
-                          <button
-                            type="button"
-                            className="rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] text-amber-900 hover:bg-amber-100"
+                          <Button
+                            size="sm"
+                            variant="secondary"
                             onClick={() => runAction.mutate({ runID: msg.run_id!, action: 'approve' })}
                           >
                             Approve
-                          </button>
+                          </Button>
                         </div>
                       ) : null}
                       {msg.role === 'assistant' && msg.run_id ? (
@@ -601,25 +606,27 @@ export function ChatPage() {
             >
               <div className="mb-2 flex items-center gap-2">
                 {!activeSession ? (
-                  <select
-                    className="h-8 w-72 max-w-[35%] rounded-md border border-gray-300 bg-white px-2 text-xs focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
-                    value={agentID}
-                    onChange={(event) => setAgentID(event.target.value)}
-                  >
-                    <option value="">Select agent</option>
-                    {(agentsQ.data ?? []).map((agent) => (
-                      <option key={agent.id} value={agent.id}>{agent.name}</option>
-                    ))}
-                  </select>
+                  <>
+                    <label htmlFor="composer-agent" className="sr-only">Agent</label>
+                    <select
+                      id="composer-agent"
+                      className={`h-8 w-72 max-w-[35%] rounded-md border border-gray-300 bg-white px-2 text-xs transition-colors focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 ${FOCUS_RING}`}
+                      value={agentID}
+                      onChange={(event) => setAgentID(event.target.value)}
+                    >
+                      <option value="">Select agent</option>
+                      {(agentsQ.data ?? []).map((agent) => (
+                        <option key={agent.id} value={agent.id}>{agent.name}</option>
+                      ))}
+                    </select>
+                  </>
                 ) : null}
                 <p className="text-xs text-gray-500">Drop files into the composer to attach.</p>
               </div>
               {pendingFiles.length > 0 ? (
                 <div className="mb-2 flex flex-wrap gap-1">
                   {pendingFiles.map((file, idx) => (
-                    <span key={`${file.name}-${idx}`} className="rounded border border-gray-300 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-700">
-                      {file.name}
-                    </span>
+                    <Chip key={`${file.name}-${idx}`}>{file.name}</Chip>
                   ))}
                 </div>
               ) : null}
@@ -636,106 +643,98 @@ export function ChatPage() {
                       Drop files to attach
                     </div>
                   ) : null}
+                <label htmlFor="composer" className="sr-only">Message</label>
                 <textarea
+                  id="composer"
                   ref={composerRef}
-                  className={`min-h-[72px] w-full rounded-md border bg-white px-3 py-2 text-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 ${
+                  aria-label="Message"
+                  className={`min-h-[72px] w-full rounded-md border bg-white px-3 py-2 text-sm transition-colors focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 ${FOCUS_RING} ${
                     isFileDragActive ? 'border-blue-400 ring-1 ring-blue-300' : 'border-gray-300'
                   }`}
-                  placeholder={activeSession ? 'Message the agent...' : 'Start this chat session'}
+                  placeholder={activeSession ? 'Message the agent…' : 'Start this chat session'}
                   value={message}
                   onChange={(event) => setMessage(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {
                       event.preventDefault()
+                      if (sendMessage.isPending || !message.trim()) return
                       void sendMessage.mutateAsync()
                     }
                   }}
                 />
                 </div>
-                <button
-                  type="button"
-                  className="h-9 rounded-md bg-gray-900 px-4 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+                <Button
                   disabled={sendMessage.isPending || !message.trim()}
                   onClick={() => void sendMessage.mutateAsync()}
                 >
-                  {sendMessage.isPending ? 'Sending...' : activeSession ? 'Send' : 'Start Chat Session'}
-                </button>
+                  {sendMessage.isPending ? 'Sending…' : activeSession ? 'Send' : 'Start Chat Session'}
+                </Button>
               </div>
               <p className="mt-2 text-xs text-gray-500">Press Enter to send, Shift+Enter for newline.</p>
-              {errorText ? <p className="mt-2 text-xs text-red-600">{errorText}</p> : null}
+              <ErrorBanner className="mt-2" title="Couldn't send message" message={errorText} />
             </div>
         </div>
       </div>
-      {isInspectorOpen && streamRunID ? (
-        <SessionContextInspector runID={streamRunID} onClose={() => setIsInspectorOpen(false)} />
-      ) : null}
-      {lightboxOpen && imageGallery.length > 0 ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-          onClick={() => setLightboxOpen(false)}
-        >
-          <div
-            className="flex h-[88vh] w-[92vw] max-w-6xl flex-col overflow-hidden rounded-xl bg-white"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-2">
-              <p className="truncate text-sm font-medium text-gray-800">
-                {imageGallery[lightboxIndex]?.artifact.path || imageGallery[lightboxIndex]?.artifact.id}
-              </p>
+      <SessionContextInspector
+        runID={streamRunID ?? ''}
+        open={isInspectorOpen && Boolean(streamRunID)}
+        onClose={() => setIsInspectorOpen(false)}
+      />
+      <Modal
+        open={lightboxOpen && imageGallery.length > 0}
+        onClose={() => setLightboxOpen(false)}
+        title={imageGallery[lightboxIndex]?.artifact.path || imageGallery[lightboxIndex]?.artifact.id || 'Artifact'}
+        widthClass="max-w-6xl"
+        padded={false}
+      >
+        <div className="relative min-h-[60vh] bg-gray-950/95">
+          <img
+            src={imageGallery[lightboxIndex]?.url}
+            alt={imageGallery[lightboxIndex]?.artifact.path || 'artifact image'}
+            className="h-[70vh] w-full object-contain"
+          />
+          {imageGallery.length > 1 ? (
+            <>
               <button
                 type="button"
-                className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
-                onClick={() => setLightboxOpen(false)}
+                aria-label="Previous image"
+                className={`absolute left-3 top-1/2 -translate-y-1/2 rounded-full border border-white/60 bg-black/50 px-3 py-2 text-xs text-white transition-colors hover:bg-black/70 ${FOCUS_RING}`}
+                onClick={showPreviousImage}
               >
-                Close
+                Prev
               </button>
-            </div>
-            <div className="relative min-h-0 flex-1 bg-gray-950/95">
-              <img
-                src={imageGallery[lightboxIndex]?.url}
-                alt={imageGallery[lightboxIndex]?.artifact.path || 'artifact image'}
-                className="h-full w-full object-contain"
-              />
-              {imageGallery.length > 1 ? (
-                <>
-                  <button
-                    type="button"
-                    className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full border border-white/60 bg-black/50 px-3 py-2 text-xs text-white hover:bg-black/70"
-                    onClick={showPreviousImage}
-                  >
-                    Prev
-                  </button>
-                  <button
-                    type="button"
-                    className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full border border-white/60 bg-black/50 px-3 py-2 text-xs text-white hover:bg-black/70"
-                    onClick={showNextImage}
-                  >
-                    Next
-                  </button>
-                </>
-              ) : null}
-            </div>
-            {imageGallery.length > 1 ? (
-              <div className="border-t border-gray-200 bg-white px-3 py-2">
-                <div className="flex gap-2 overflow-x-auto">
-                  {imageGallery.map((item, idx) => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      className={`shrink-0 overflow-hidden rounded border ${
-                        idx === lightboxIndex ? 'border-gray-900' : 'border-gray-300'
-                      }`}
-                      onClick={() => setLightboxIndex(idx)}
-                    >
-                      <img src={item.url} alt={item.artifact.path || item.artifact.id} className="h-16 w-24 object-cover" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </div>
+              <button
+                type="button"
+                aria-label="Next image"
+                className={`absolute right-3 top-1/2 -translate-y-1/2 rounded-full border border-white/60 bg-black/50 px-3 py-2 text-xs text-white transition-colors hover:bg-black/70 ${FOCUS_RING}`}
+                onClick={showNextImage}
+              >
+                Next
+              </button>
+            </>
+          ) : null}
         </div>
-      ) : null}
+        {imageGallery.length > 1 ? (
+          <div className="border-t border-gray-200 bg-white px-3 py-2">
+            <div className="flex gap-2 overflow-x-auto">
+              {imageGallery.map((item, idx) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  aria-label={`View image ${idx + 1}`}
+                  aria-pressed={idx === lightboxIndex}
+                  className={`shrink-0 overflow-hidden rounded-md border transition-colors ${FOCUS_RING} ${
+                    idx === lightboxIndex ? 'border-gray-900' : 'border-gray-300'
+                  }`}
+                  onClick={() => setLightboxIndex(idx)}
+                >
+                  <img src={item.url} alt={item.artifact.path || item.artifact.id} className="h-16 w-24 object-cover" />
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </div>
   )
 }
