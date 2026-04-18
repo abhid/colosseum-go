@@ -1154,6 +1154,9 @@ func approveLatestHandler(db *sql.DB) http.HandlerFunc {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		var hasPolicyPending int
+		_ = tx.QueryRowContext(r.Context(),
+			`SELECT COUNT(1) FROM approvals WHERE run_id=? AND status='pending' AND source='policy'`, runID).Scan(&hasPolicyPending)
 		resApproval, err := tx.ExecContext(r.Context(), `UPDATE approvals SET status='approved', decided_at=?, decided_by='operator' WHERE run_id=? AND status='pending'`, now, runID)
 		if err != nil {
 			_ = tx.Rollback()
@@ -1166,17 +1169,21 @@ func approveLatestHandler(db *sql.DB) http.HandlerFunc {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "no pending approvals for this run"})
 			return
 		}
-		resRun, err := tx.ExecContext(r.Context(), `UPDATE runs SET status='queued', updated_at=? WHERE id=? AND status='interrupted'`, now, runID)
-		if err != nil {
-			_ = tx.Rollback()
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		runAffected, _ := resRun.RowsAffected()
-		if runAffected == 0 {
-			_ = tx.Rollback()
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "run is not interrupted"})
-			return
+		// Only policy-sourced approvals interrupt the run; model-sourced
+		// approvals keep the run running while the tool polls for a decision.
+		if hasPolicyPending > 0 {
+			resRun, err := tx.ExecContext(r.Context(), `UPDATE runs SET status='queued', updated_at=? WHERE id=? AND status='interrupted'`, now, runID)
+			if err != nil {
+				_ = tx.Rollback()
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			runAffected, _ := resRun.RowsAffected()
+			if runAffected == 0 {
+				_ = tx.Rollback()
+				writeJSON(w, http.StatusConflict, map[string]string{"error": "run is not interrupted"})
+				return
+			}
 		}
 		if err := tx.Commit(); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

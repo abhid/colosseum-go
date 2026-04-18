@@ -236,10 +236,3 @@ func (c *SandboxCapabilities) summaryMap() map[string]any {
 	}
 }
 
-func truncateOneLine(s string, n int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
-}

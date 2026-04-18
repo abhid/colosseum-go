@@ -47,7 +47,7 @@ func EvaluateTool(toolName string, input json.RawMessage, allowed []string) Deci
 		}
 	}
 
-	if toolName == "web.fetch" {
+	if toolName == "web.fetch" || toolName == "http.request" {
 		var req struct {
 			URL string `json:"url"`
 		}
@@ -62,7 +62,7 @@ func EvaluateTool(toolName string, input json.RawMessage, allowed []string) Deci
 
 	if strings.HasPrefix(toolName, "browser.") {
 		switch toolName {
-		case "browser.open", "browser.action", "browser.snapshot", "browser.wait", "browser.close":
+		case "browser.open", "browser.action", "browser.snapshot", "browser.screenshot", "browser.wait", "browser.close":
 		default:
 			return Decision{Allow: false, Reason: "unsupported browser tool"}
 		}

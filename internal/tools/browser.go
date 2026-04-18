@@ -209,6 +209,59 @@ func (e *Executor) browserWait(ctx context.Context, runCtx Context, input json.R
 	}}, nil
 }
 
+func (e *Executor) browserScreenshot(ctx context.Context, runCtx Context, input json.RawMessage) (Result, error) {
+	var req struct {
+		FullPage *bool `json:"full_page"`
+	}
+	_ = json.Unmarshal(input, &req)
+	fullPage := true
+	if req.FullPage != nil {
+		fullPage = *req.FullPage
+	}
+	rt := e.ensureBrowserRuntime()
+	session := rt.getOrCreateSession(runCtx.RunID)
+	if strings.TrimSpace(session.CurrentURL) == "" {
+		return Result{}, fmt.Errorf("browser session has no open page; call browser.open first")
+	}
+	out, backend, err := e.runBrowserScript(ctx, runCtx, browserScriptParams{
+		URL:            session.CurrentURL,
+		TakeScreenshot: true,
+		FullPage:       fullPage,
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	session.CurrentURL = out.URL
+	session.LastTitle = out.Title
+	session.Backend = backend
+	if out.Screenshot == "" {
+		return Result{}, fmt.Errorf("screenshot capture returned no file")
+	}
+	var size int64
+	if info, statErr := os.Stat(out.Screenshot); statErr == nil {
+		size = info.Size()
+	}
+	_ = e.insertArtifactRecord(runCtx, "browser_screenshot", out.Screenshot, "image/png", size)
+	var artifactID string
+	if e.DB != nil {
+		_ = e.DB.QueryRowContext(ctx,
+			`SELECT id FROM artifacts WHERE run_id=? AND path=? ORDER BY created_at DESC LIMIT 1`,
+			runCtx.RunID, out.Screenshot).Scan(&artifactID)
+	}
+	return Result{
+		Output: map[string]any{
+			"ok":              true,
+			"url":             out.URL,
+			"title":           out.Title,
+			"screenshot_path": out.Screenshot,
+			"artifact_id":     artifactID,
+			"size_bytes":      size,
+			"backend":         backend,
+		},
+		Artifacts: []string{out.Screenshot},
+	}, nil
+}
+
 func (e *Executor) browserClose(ctx context.Context, runCtx Context) (Result, error) {
 	_ = ctx
 	rt := e.ensureBrowserRuntime()
@@ -237,6 +290,7 @@ type browserScriptParams struct {
 	URL            string `json:"url"`
 	DoOpen         bool   `json:"do_open"`
 	TakeScreenshot bool   `json:"take_screenshot"`
+	FullPage       bool   `json:"full_page"`
 	Action         string `json:"action"`
 	Selector       string `json:"selector"`
 	Text           string `json:"text"`
@@ -535,7 +589,7 @@ const run = async () => {
   if (input.take_screenshot) {
     const screenshotName = 'screenshot-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex') + '.png';
     const screenshotPath = path.join(sessionDir, screenshotName);
-    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await page.screenshot({ path: screenshotPath, fullPage: input.full_page !== false });
     screenshot = screenshotPath;
   }
   await context.storageState({ path: storagePath });

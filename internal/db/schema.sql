@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS agents (
   default_credential_vault_id TEXT NOT NULL DEFAULT '',
   output_contract_type TEXT NOT NULL DEFAULT 'none',
   output_contract_payload TEXT NOT NULL DEFAULT '',
+  planning_mode TEXT NOT NULL DEFAULT 'off',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
@@ -34,6 +35,7 @@ CREATE TABLE IF NOT EXISTS runs (
   credential_vault_id TEXT NOT NULL DEFAULT '',
   output_contract_type TEXT NOT NULL DEFAULT 'none',
   output_contract_payload TEXT NOT NULL DEFAULT '',
+  parent_run_id TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   started_at TEXT,
@@ -41,6 +43,7 @@ CREATE TABLE IF NOT EXISTS runs (
   error TEXT NOT NULL DEFAULT '',
   FOREIGN KEY(agent_id) REFERENCES agents(id)
 );
+CREATE INDEX IF NOT EXISTS idx_runs_parent ON runs(parent_run_id);
 
 CREATE TABLE IF NOT EXISTS chat_sessions (
   id TEXT PRIMARY KEY,
@@ -171,12 +174,73 @@ CREATE TABLE IF NOT EXISTS approvals (
   step_id TEXT NOT NULL DEFAULT '',
   reason TEXT NOT NULL,
   status TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'policy',
+  details TEXT NOT NULL DEFAULT '',
+  risk TEXT NOT NULL DEFAULT '',
   requested_at TEXT NOT NULL,
   decided_at TEXT,
   decided_by TEXT NOT NULL DEFAULT '',
   decision_note TEXT NOT NULL DEFAULT '',
+  plan_step_id TEXT NOT NULL DEFAULT '',
   FOREIGN KEY(run_id) REFERENCES runs(id)
 );
+
+CREATE TABLE IF NOT EXISTS session_scratchpad (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(session_id, key),
+  FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_scratchpad_session_updated ON session_scratchpad(session_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS session_plans (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL DEFAULT '',
+  version INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  completed_at TEXT,
+  FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_session_plans_session ON session_plans(session_id);
+
+CREATE TABLE IF NOT EXISTS session_plan_steps (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL,
+  idx INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL,
+  blocker TEXT NOT NULL DEFAULT '',
+  owner_run_id TEXT NOT NULL DEFAULT '',
+  started_at TEXT,
+  completed_at TEXT,
+  notes TEXT NOT NULL DEFAULT '',
+  FOREIGN KEY(plan_id) REFERENCES session_plans(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_session_plan_steps_plan_idx ON session_plan_steps(plan_id, idx);
+CREATE INDEX IF NOT EXISTS idx_session_plan_steps_status ON session_plan_steps(plan_id, status);
+
+CREATE TABLE IF NOT EXISTS run_processes (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  label TEXT NOT NULL DEFAULT '',
+  pid INTEGER NOT NULL,
+  command TEXT NOT NULL,
+  log_path TEXT NOT NULL,
+  status TEXT NOT NULL,
+  exit_code INTEGER,
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_run_processes_run ON run_processes(run_id);
 
 CREATE TABLE IF NOT EXISTS policies (
   id TEXT PRIMARY KEY,

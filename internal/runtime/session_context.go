@@ -47,8 +47,11 @@ func (m *Manager) buildChatSessionContext(ctx context.Context, runID, task, work
 	summaries := m.recentChatTurnSummaries(ctx, sessionID, runID, 6)
 	manifest := scanWorkspaceManifest(workspace, 24)
 	artifacts := m.sessionArtifactIndex(ctx, sessionID, runID, 16)
+	scratchpad := m.sessionScratchpadIndex(ctx, sessionID, 10)
 	prior := m.lastChatExchange(ctx, sessionID, runID)
 	capabilities := probeSandbox(ctx, m.SandboxImage)
+	plan := m.sessionPlanSnapshot(ctx, sessionID)
+	planningMode := m.agentPlanningMode(ctx, runID)
 
 	primer := buildSessionPrimer(sessionPrimerInput{
 		SessionTitle: sessionTitle,
@@ -56,6 +59,9 @@ func (m *Manager) buildChatSessionContext(ctx context.Context, runID, task, work
 		Summaries:    summaries,
 		Manifest:     manifest,
 		Artifacts:    artifacts,
+		Scratchpad:   scratchpad,
+		Plan:         plan,
+		PlanningMode: planningMode,
 		Capabilities: capabilities,
 	})
 
@@ -96,24 +102,46 @@ func (m *Manager) buildChatSessionContext(ctx context.Context, runID, task, work
 			"workspace_path": relativeWorkspacePath(a.Path, a.Workspace),
 		})
 	}
+	scratchpadRows := make([]map[string]any, 0, len(scratchpad))
+	for _, s := range scratchpad {
+		scratchpadRows = append(scratchpadRows, map[string]any{
+			"key":        s.Key,
+			"note":       s.Note,
+			"value_len":  len(s.Value),
+			"updated_at": s.UpdatedAt,
+		})
+	}
+	packSummary := map[string]any{
+		"session_id":         sessionID,
+		"turn_index":         turnIndex,
+		"summary_count":      len(summaries),
+		"workspace_entries":  len(manifest),
+		"session_artifacts":  len(artifacts),
+		"scratchpad_count":   len(scratchpad),
+		"prior_exchange_len": len(prior),
+		"primer_chars":       len(primer),
+		"primer":             primer,
+		"summaries":          summaryRows,
+		"manifest":           manifestRows,
+		"artifacts":          artifactRows,
+		"scratchpad":         scratchpadRows,
+		"planning_mode":      planningMode,
+		"sandbox":            capabilities.summaryMap(),
+	}
+	if plan != nil {
+		packSummary["plan_version"] = plan.Version
+		packSummary["plan_step_count"] = len(plan.Steps)
+		packSummary["plan_completed_count"] = plan.CompletedCount()
+		if inflight := plan.InProgressTitle(); inflight != "" {
+			packSummary["plan_in_progress_title"] = inflight
+		}
+		packSummary["plan_completed"] = plan.CompletedAt != ""
+	}
 	return chatSessionContext{
-		SessionID: sessionID,
-		TurnIndex: turnIndex,
-		Messages:  msgs,
-		PackSummary: map[string]any{
-			"session_id":         sessionID,
-			"turn_index":         turnIndex,
-			"summary_count":      len(summaries),
-			"workspace_entries":  len(manifest),
-			"session_artifacts":  len(artifacts),
-			"prior_exchange_len": len(prior),
-			"primer_chars":       len(primer),
-			"primer":             primer,
-			"summaries":          summaryRows,
-			"manifest":           manifestRows,
-			"artifacts":          artifactRows,
-			"sandbox":            capabilities.summaryMap(),
-		},
+		SessionID:   sessionID,
+		TurnIndex:   turnIndex,
+		Messages:    msgs,
+		PackSummary: packSummary,
 	}, true
 }
 
@@ -123,6 +151,9 @@ type sessionPrimerInput struct {
 	Summaries    []chatTurnSummary
 	Manifest     []workspaceEntry
 	Artifacts    []sessionArtifact
+	Scratchpad   []scratchpadEntry
+	Plan         *sessionPlan
+	PlanningMode string
 	Capabilities *SandboxCapabilities
 }
 
@@ -134,6 +165,16 @@ func buildSessionPrimer(in sessionPrimerInput) string {
 	}
 	if in.TurnIndex > 0 {
 		fmt.Fprintf(&b, "Current turn: %d\n", in.TurnIndex)
+	}
+
+	// Plan first — it's the most valuable recall artifact for long-running
+	// sessions and handoffs. If a plan exists, we render it before summaries so
+	// the model reads intent before tactics.
+	if section := renderPlanSection(in.Plan); section != "" {
+		b.WriteString(section)
+	}
+	if nudge := renderPlanningNudge(in.PlanningMode, in.Plan); nudge != "" {
+		b.WriteString(nudge)
 	}
 
 	if len(in.Summaries) > 0 {
@@ -159,6 +200,18 @@ func buildSessionPrimer(in sessionPrimerInput) string {
 		for _, a := range in.Artifacts {
 			fmt.Fprintf(&b, "- id=%s kind=%s mime=%s path=%s\n",
 				a.ID, a.Kind, a.MIME, relativeWorkspacePath(a.Path, a.Workspace))
+		}
+	}
+
+	if len(in.Scratchpad) > 0 {
+		b.WriteString("\n## Scratchpad (session-scoped notes; use scratchpad.read to load full value)\n")
+		for _, s := range in.Scratchpad {
+			preview := previewScratchpadValue(s.Value, 160)
+			if note := strings.TrimSpace(s.Note); note != "" {
+				fmt.Fprintf(&b, "- %s (%s) — %s\n", s.Key, note, preview)
+			} else {
+				fmt.Fprintf(&b, "- %s — %s\n", s.Key, preview)
+			}
 		}
 	}
 
@@ -309,6 +362,63 @@ func (m *Manager) sessionArtifactIndex(ctx context.Context, sessionID, excludeRu
 		})
 	}
 	return out
+}
+
+type scratchpadEntry struct {
+	Key       string
+	Value     string
+	Note      string
+	UpdatedAt string
+}
+
+// sessionScratchpadIndex returns the most-recent scratchpad entries for the
+// session. The primer surfaces keys + short previews so the model is reminded
+// that these notes exist without flooding context; full values are fetched on
+// demand via scratchpad.read.
+func (m *Manager) sessionScratchpadIndex(ctx context.Context, sessionID string, limit int) []scratchpadEntry {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := m.DB.QueryContext(ctx, `
+		SELECT key, value, COALESCE(note,''), updated_at
+		FROM session_scratchpad
+		WHERE session_id=?
+		ORDER BY updated_at DESC
+		LIMIT ?
+	`, sessionID, limit)
+	if err != nil && err != sql.ErrNoRows {
+		return nil
+	}
+	if rows == nil {
+		return nil
+	}
+	defer rows.Close()
+	out := make([]scratchpadEntry, 0, limit)
+	var budget int
+	const maxBudget = 2048
+	for rows.Next() {
+		var e scratchpadEntry
+		if err := rows.Scan(&e.Key, &e.Value, &e.Note, &e.UpdatedAt); err != nil {
+			continue
+		}
+		budget += len(e.Key) + len(e.Value) + len(e.Note)
+		if budget > maxBudget && len(out) > 0 {
+			break
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+func previewScratchpadValue(value string, max int) string {
+	v := strings.ReplaceAll(strings.TrimSpace(value), "\n", " ")
+	if max <= 0 || len(v) <= max {
+		return v
+	}
+	return v[:max] + "…"
 }
 
 func relativeWorkspacePath(path, workspace string) string {

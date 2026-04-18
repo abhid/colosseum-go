@@ -158,3 +158,36 @@ func TestProcessOneSerializesSessionTurns(t *testing.T) {
 		t.Fatalf("expected r2 to progress past queued after r1 completed, still queued")
 	}
 }
+
+func TestFilterProviderToolsRespectsAllowlist(t *testing.T) {
+	defs := []tools.Definition{
+		{Name: "file.read"}, {Name: "file.write"}, {Name: "browser.screenshot"},
+	}
+	out := filterProviderTools(defs, []string{"file.read", "file.write"})
+	if len(out) != 2 {
+		t.Fatalf("expected 2 tools after filter, got %d: %+v", len(out), out)
+	}
+	for _, tool := range out {
+		if tool.Name == "browser.screenshot" {
+			t.Fatalf("browser.screenshot should have been filtered out")
+		}
+	}
+}
+
+func TestFilterProviderToolsEmptyAllowlistPassesAll(t *testing.T) {
+	defs := []tools.Definition{{Name: "a"}, {Name: "b"}}
+	if got := filterProviderTools(defs, nil); len(got) != 2 {
+		t.Fatalf("empty allowlist should pass all tools, got %d", len(got))
+	}
+	if got := filterProviderTools(defs, []string{}); len(got) != 2 {
+		t.Fatalf("empty slice allowlist should pass all tools, got %d", len(got))
+	}
+}
+
+func TestFilterProviderToolsTrimsWhitespace(t *testing.T) {
+	defs := []tools.Definition{{Name: "file.read"}, {Name: "file.write"}}
+	out := filterProviderTools(defs, []string{"  file.read  ", ""})
+	if len(out) != 1 || out[0].Name != "file.read" {
+		t.Fatalf("expected [file.read] after whitespace trim, got %+v", out)
+	}
+}

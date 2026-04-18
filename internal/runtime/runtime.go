@@ -260,10 +260,7 @@ func (m *Manager) run(ctx context.Context, runID, agentID, task, workspace, prov
 	if err != nil {
 		return m.failRun(ctx, runID, fmt.Errorf("list tools: %w", err))
 	}
-	providerTools := make([]providers.Tool, 0, len(toolDefs))
-	for _, t := range toolDefs {
-		providerTools = append(providerTools, providers.Tool{Name: t.Name, Description: t.Description, InputSchema: t.Schema})
-	}
+	providerTools := filterProviderTools(toolDefs, allowedTools)
 
 	for step := 1; step <= maxSteps; step++ {
 		if ctx.Err() != nil {
@@ -811,6 +808,29 @@ func extractUserMessageFromJSON(raw []byte) string {
 		}
 	}
 	return ""
+}
+
+// filterProviderTools narrows the tool set we advertise to the LLM to the
+// agent's allowed_tools list. Empty allowed list means "no restriction" — same
+// semantics as policy.EvaluateTool, so we don't silently muzzle agents that
+// haven't configured an allowlist.
+func filterProviderTools(defs []tools.Definition, allowed []string) []providers.Tool {
+	allowSet := make(map[string]struct{}, len(allowed))
+	for _, t := range allowed {
+		if n := strings.TrimSpace(t); n != "" {
+			allowSet[n] = struct{}{}
+		}
+	}
+	out := make([]providers.Tool, 0, len(defs))
+	for _, t := range defs {
+		if len(allowSet) > 0 {
+			if _, ok := allowSet[t.Name]; !ok {
+				continue
+			}
+		}
+		out = append(out, providers.Tool{Name: t.Name, Description: t.Description, InputSchema: t.Schema})
+	}
+	return out
 }
 
 func buildEffectiveSystemPrompt(base string, allowedTools []string) string {
