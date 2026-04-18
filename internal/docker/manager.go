@@ -18,7 +18,7 @@ type Manager struct {
 
 func NewManager(db *sql.DB, imageName string) (*Manager, error) {
 	if imageName == "" {
-		imageName = "golang:1.25-bookworm"
+		imageName = "python:3.12"
 	}
 	return &Manager{DB: db, Image: imageName}, nil
 }

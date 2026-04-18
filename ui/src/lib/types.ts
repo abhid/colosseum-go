@@ -140,6 +140,28 @@ export type TraceSpan = {
   attrs_json: string
 }
 
+export type LLMRequestMessageSummary = {
+  role?: string
+  name?: string
+  tool_call_id?: string
+  content_preview?: string
+  content_length?: number
+  content_parts?: number
+  content_part_types?: string[]
+  content_part_preview?: string[]
+}
+
+export type LLMRequestSnapshot = {
+  model?: string
+  system_prompt?: string
+  system_prompt_len?: number
+  message_count?: number
+  tool_count?: number
+  tool_names?: string[]
+  message_role_counts?: Record<string, number>
+  messages?: LLMRequestMessageSummary[]
+}
+
 export type RunTelemetry = {
   steps: RunStep[]
   tool_calls: ToolCall[]

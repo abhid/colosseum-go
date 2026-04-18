@@ -48,6 +48,7 @@ func (m *Manager) buildChatSessionContext(ctx context.Context, runID, task, work
 	manifest := scanWorkspaceManifest(workspace, 24)
 	artifacts := m.sessionArtifactIndex(ctx, sessionID, runID, 16)
 	prior := m.lastChatExchange(ctx, sessionID, runID)
+	capabilities := probeSandbox(ctx, m.SandboxImage)
 
 	primer := buildSessionPrimer(sessionPrimerInput{
 		SessionTitle: sessionTitle,
@@ -55,6 +56,7 @@ func (m *Manager) buildChatSessionContext(ctx context.Context, runID, task, work
 		Summaries:    summaries,
 		Manifest:     manifest,
 		Artifacts:    artifacts,
+		Capabilities: capabilities,
 	})
 
 	msgs := make([]providers.Message, 0, 4)
@@ -69,6 +71,31 @@ func (m *Manager) buildChatSessionContext(ctx context.Context, runID, task, work
 		msgs = append(msgs, providers.Message{Role: "user", Content: cleanTask})
 	}
 
+	summaryRows := make([]map[string]any, 0, len(summaries))
+	for _, s := range summaries {
+		summaryRows = append(summaryRows, map[string]any{
+			"run_id":     s.RunID,
+			"turn_index": s.TurnIndex,
+			"summary":    s.Summary,
+		})
+	}
+	manifestRows := make([]map[string]any, 0, len(manifest))
+	for _, e := range manifest {
+		manifestRows = append(manifestRows, map[string]any{
+			"path":   e.Path,
+			"is_dir": e.IsDir,
+		})
+	}
+	artifactRows := make([]map[string]any, 0, len(artifacts))
+	for _, a := range artifacts {
+		artifactRows = append(artifactRows, map[string]any{
+			"id":             a.ID,
+			"kind":           a.Kind,
+			"mime":           a.MIME,
+			"path":           a.Path,
+			"workspace_path": relativeWorkspacePath(a.Path, a.Workspace),
+		})
+	}
 	return chatSessionContext{
 		SessionID: sessionID,
 		TurnIndex: turnIndex,
@@ -81,6 +108,11 @@ func (m *Manager) buildChatSessionContext(ctx context.Context, runID, task, work
 			"session_artifacts":  len(artifacts),
 			"prior_exchange_len": len(prior),
 			"primer_chars":       len(primer),
+			"primer":             primer,
+			"summaries":          summaryRows,
+			"manifest":           manifestRows,
+			"artifacts":          artifactRows,
+			"sandbox":            capabilities.summaryMap(),
 		},
 	}, true
 }
@@ -91,6 +123,7 @@ type sessionPrimerInput struct {
 	Summaries    []chatTurnSummary
 	Manifest     []workspaceEntry
 	Artifacts    []sessionArtifact
+	Capabilities *SandboxCapabilities
 }
 
 func buildSessionPrimer(in sessionPrimerInput) string {
@@ -127,6 +160,10 @@ func buildSessionPrimer(in sessionPrimerInput) string {
 			fmt.Fprintf(&b, "- id=%s kind=%s mime=%s path=%s\n",
 				a.ID, a.Kind, a.MIME, relativeWorkspacePath(a.Path, a.Workspace))
 		}
+	}
+
+	if section := in.Capabilities.primerSection(); section != "" {
+		b.WriteString(section)
 	}
 
 	b.WriteString("\n## Conventions for this conversation\n")

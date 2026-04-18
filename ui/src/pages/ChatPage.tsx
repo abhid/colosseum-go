@@ -7,9 +7,11 @@ import { api } from '../lib/api'
 import { queryKeys } from '../lib/queryKeys'
 import type { Artifact } from '../lib/types'
 import { ArtifactPreview, MarkdownBubble } from '../components/ChatComponents'
-import { 
-  type UiMessage, 
-  type ImageGalleryItem, 
+import { RunInlineTimeline } from '../components/RunInlineTimeline'
+import { SessionContextInspector } from '../components/SessionContextInspector'
+import {
+  type UiMessage,
+  type ImageGalleryItem,
   collapseAssistantThinking,
   isThinkingStatus,
   isApprovalMessage,
@@ -40,6 +42,7 @@ export function ChatPage() {
   const [isAwaitingResponse, setIsAwaitingResponse] = useState(false)
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState(0)
+  const [isInspectorOpen, setIsInspectorOpen] = useState(false)
 
   const agentsQ = useQuery({ queryKey: queryKeys.agents, queryFn: api.listAgents })
   const sessionsQ = useQuery({ queryKey: queryKeys.chatSessions, queryFn: api.listChatSessions, refetchInterval: 2200 })
@@ -420,6 +423,15 @@ export function ChatPage() {
                     <button
                       type="button"
                       className="border-l border-gray-300 px-2 py-1 hover:bg-gray-50"
+                      onClick={() => setIsInspectorOpen(true)}
+                      disabled={!streamRunID}
+                      title={streamRunID ? 'Inspect packed session context' : 'Send a message first to build context'}
+                    >
+                      Context
+                    </button>
+                    <button
+                      type="button"
+                      className="border-l border-gray-300 px-2 py-1 hover:bg-gray-50"
                       onClick={() => patchSession.mutate({ pinned: !selectedSession.pinned_at })}
                     >
                       {selectedSession.pinned_at ? 'Unpin' : 'Pin'}
@@ -558,6 +570,9 @@ export function ChatPage() {
                           </button>
                         </div>
                       ) : null}
+                      {msg.role === 'assistant' && msg.run_id ? (
+                        <RunInlineTimeline runID={msg.run_id} isLive={msg.run_id === streamRunID} />
+                      ) : null}
                     </div>
                   </div>
                 ))
@@ -651,6 +666,9 @@ export function ChatPage() {
             </div>
         </div>
       </div>
+      {isInspectorOpen && streamRunID ? (
+        <SessionContextInspector runID={streamRunID} onClose={() => setIsInspectorOpen(false)} />
+      ) : null}
       {lightboxOpen && imageGallery.length > 0 ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"

@@ -18,8 +18,9 @@ import {
   IconArrowDownLeft,
 } from '@tabler/icons-react'
 import { api } from '../lib/api'
-import type { Artifact, TraceSpan } from '../lib/types'
+import type { Artifact, LLMRequestSnapshot, TraceSpan } from '../lib/types'
 import { queryKeys } from '../lib/queryKeys'
+import { formatDuration, parseJSONStringRecord, parseTimeMs, prettyJSON, tryParseJSON } from '../lib/time'
 
 import { formatDistanceToNow } from 'date-fns'
 
@@ -40,28 +41,6 @@ type EventRow = {
 type DisplayArtifact = Artifact & {
   _inline_log?: string
   _order?: number
-}
-
-type LLMRequestMessageSummary = {
-  role?: string
-  name?: string
-  tool_call_id?: string
-  content_preview?: string
-  content_length?: number
-  content_parts?: number
-  content_part_types?: string[]
-  content_part_preview?: string[]
-}
-
-type LLMRequestSnapshot = {
-  model?: string
-  system_prompt?: string
-  system_prompt_len?: number
-  message_count?: number
-  tool_count?: number
-  tool_names?: string[]
-  message_role_counts?: Record<string, number>
-  messages?: LLMRequestMessageSummary[]
 }
 
 type ActorLaneId = 'orchestrator' | 'tools' | 'system' | 'user'
@@ -1146,37 +1125,6 @@ function actorFromSpan(span: TraceSpan): ActorLaneId {
   return 'system'
 }
 
-function parseJSONStringRecord(value: string) {
-  if (!value || typeof value !== 'string') return null
-  try {
-    const parsed = JSON.parse(value)
-    if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>
-    return null
-  } catch {
-    return null
-  }
-}
-
-function prettyJSON(value: string) {
-  const parsed = parseJSONStringRecord(value)
-  if (parsed) return JSON.stringify(parsed, null, 2)
-  return value || '{}'
-}
-
-function parseTimeMs(value?: string) {
-  if (!value) return NaN
-  const n = Date.parse(value)
-  return Number.isNaN(n) ? NaN : n
-}
-
-function tryParseJSON(value: string) {
-  try {
-    return JSON.parse(value) as Record<string, unknown>
-  } catch {
-    return value
-  }
-}
-
 function usageLabelFromPayload(payload: Record<string, unknown> | string) {
   if (typeof payload !== 'object' || payload === null) return null
   const usage = payload.usage as Record<string, unknown>
@@ -1185,19 +1133,6 @@ function usageLabelFromPayload(payload: Record<string, unknown> | string) {
   const outTokens = Number(usage.output_tokens || 0)
   if (inTokens === 0 && outTokens === 0) return null
   return { inTokens, outTokens }
-}
-
-function formatDuration(ms: number) {
-  if (!ms || ms < 0) return '0s'
-  if (ms < 1000) return '<1s'
-  const s = Math.floor(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  const rem = s % 60
-  if (m < 60) return `${m}m ${rem}s`
-  const h = Math.floor(m / 60)
-  const remM = m % 60
-  return `${h}h ${remM}m`
 }
 
 function toDisplayPath(rawPath: string) {

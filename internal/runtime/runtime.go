@@ -84,20 +84,21 @@ func (s *DBRunEventStore) GetCheckpoint(ctx context.Context, runID string) (int,
 }
 
 type Manager struct {
-	DB        *sql.DB
-	Store     RunEventStore
-	Providers map[string]providers.Client
-	Tools     *tools.Executor
-	SecretKey string
-	wg        sync.WaitGroup
+	DB           *sql.DB
+	Store        RunEventStore
+	Providers    map[string]providers.Client
+	Tools        *tools.Executor
+	SecretKey    string
+	SandboxImage string
+	wg           sync.WaitGroup
 }
 
-func NewManager(db *sql.DB, providerMap map[string]providers.Client, toolExec *tools.Executor, secretKey string) *Manager {
+func NewManager(db *sql.DB, providerMap map[string]providers.Client, toolExec *tools.Executor, secretKey string, sandboxImage string) *Manager {
 	store := &DBRunEventStore{DB: db}
 	if toolExec != nil && toolExec.EventSink == nil {
 		toolExec.EventSink = store
 	}
-	return &Manager{DB: db, Store: store, Providers: providerMap, Tools: toolExec, SecretKey: secretKey}
+	return &Manager{DB: db, Store: store, Providers: providerMap, Tools: toolExec, SecretKey: secretKey, SandboxImage: sandboxImage}
 }
 
 func (m *Manager) Start(ctx context.Context) {
@@ -147,7 +148,21 @@ func (m *Manager) processOne(ctx context.Context) {
 	}
 	var runID, agentID, task, workspace, providerName, model, environmentID, vaultID string
 	var maxSteps int
-	err := m.DB.QueryRowContext(ctx, `SELECT id,agent_id,task,workspace_path,provider,model,max_steps,environment_id,credential_vault_id FROM runs WHERE status='queued' ORDER BY created_at ASC LIMIT 1`).Scan(&runID, &agentID, &task, &workspace, &providerName, &model, &maxSteps, &environmentID, &vaultID)
+	err := m.DB.QueryRowContext(ctx, `
+		SELECT r.id, r.agent_id, r.task, r.workspace_path, r.provider, r.model, r.max_steps, r.environment_id, r.credential_vault_id
+		FROM runs r
+		WHERE r.status='queued'
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM session_runs sr
+			JOIN session_runs sr2 ON sr2.session_id = sr.session_id AND sr2.turn_index < sr.turn_index
+			JOIN runs r2 ON r2.id = sr2.run_id
+			WHERE sr.run_id = r.id
+			  AND r2.status IN ('queued','running','interrupted')
+		  )
+		ORDER BY r.created_at ASC
+		LIMIT 1
+	`).Scan(&runID, &agentID, &task, &workspace, &providerName, &model, &maxSteps, &environmentID, &vaultID)
 	if err == sql.ErrNoRows {
 		return
 	}

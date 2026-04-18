@@ -134,7 +134,7 @@ func runServer(args []string) {
 		Image:    cfg.BrowserImage,
 		Fallback: cfg.BrowserFallback,
 	}
-	runtimeMgr := runtime.NewManager(database, providerMap, toolExec, cfg.SecretKey)
+	runtimeMgr := runtime.NewManager(database, providerMap, toolExec, cfg.SecretKey, cfg.DockerImage)
 	runtimeCtx, runtimeCancel := context.WithCancel(context.Background())
 	defer runtimeCancel()
 	go runtimeMgr.Start(runtimeCtx)

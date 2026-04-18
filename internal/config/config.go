@@ -41,7 +41,7 @@ func Load(args []string) (Config, error) {
 		ArtifactPath:    getenv("COLOSSEUM_ARTIFACT_PATH", "./artifacts"),
 		WorkspaceRoot:   getenv("COLOSSEUM_WORKSPACE_ROOT", "./workspaces"),
 		DockerHost:      getenv("DOCKER_HOST", ""),
-		DockerImage:     getenv("COLOSSEUM_DOCKER_IMAGE", "golang:1.25-bookworm"),
+		DockerImage:     getenv("COLOSSEUM_DOCKER_IMAGE", "python:3.12"),
 		OpenAIKey:       os.Getenv("OPENAI_API_KEY"),
 		AnthropicKey:    os.Getenv("ANTHROPIC_API_KEY"),
 		APIAuthToken:    os.Getenv("COLOSSEUM_API_AUTH_TOKEN"),
