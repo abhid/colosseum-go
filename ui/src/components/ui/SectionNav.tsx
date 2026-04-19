@@ -5,7 +5,7 @@ import { FOCUS_RING } from '../../lib/tokens'
 
 export type SectionEntry = { id: string; label: string }
 
-export function AgentSectionNav({
+export function SectionNav({
   sections,
   containerRef,
 }: {
@@ -47,7 +47,7 @@ export function AgentSectionNav({
   }
 
   return (
-    <nav aria-label="Agent sections" className="space-y-1 pr-1">
+    <nav aria-label="Sections" className="space-y-1 pr-1">
       {sections.map((section) => {
         const isActive = section.id === active
         return (

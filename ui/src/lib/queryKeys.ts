@@ -9,6 +9,7 @@ export const queryKeys = {
   credentialVaults: ['credential-vaults'] as const,
   policies: ['policies'] as const,
   secrets: ['secrets'] as const,
+  providerConfigs: ['provider-configs'] as const,
   run: (id: string) => ['run', id] as const,
   chatSession: (id: string) => ['chat-session', id] as const,
   chatMessages: (id: string) => ['chat-session', id, 'messages'] as const,

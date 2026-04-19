@@ -20,8 +20,8 @@ import type { AgentFormState } from '../lib/agentForm'
 import { AgentEditorForm } from '../components/agent/AgentEditorForm'
 import type { ToolOption } from '../components/agent/AgentEditorForm'
 import { AgentInspector } from '../components/agent/AgentInspector'
-import { AgentSectionNav } from '../components/agent/AgentSectionNav'
-import type { SectionEntry } from '../components/agent/AgentSectionNav'
+import { SectionNav } from '../components/ui/SectionNav'
+import type { SectionEntry } from '../components/ui/SectionNav'
 import { RunLaunchDialog } from '../components/agent/RunLaunchDialog'
 import { DangerZone } from '../components/agent/DangerZone'
 
@@ -249,7 +249,7 @@ export function AgentDetailPage() {
         )}
       >
         <aside className="min-h-0 overflow-auto border-r border-gray-200 bg-gray-50 px-3 py-5">
-          <AgentSectionNav sections={SECTIONS} containerRef={editorScrollRef} />
+          <SectionNav sections={SECTIONS} containerRef={editorScrollRef} />
         </aside>
 
         <div ref={editorScrollRef} className="min-h-0 overflow-auto px-6 py-5">

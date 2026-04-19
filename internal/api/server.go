@@ -28,6 +28,7 @@ func NewServer(
 	workspaceRoot string,
 	providers map[string]bool,
 	openAIKey string,
+	anthropicKey string,
 	secretKey string,
 	apiAuthToken string,
 	providerMap map[string]providers.Client,
@@ -54,7 +55,7 @@ func NewServer(
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
 
-	registerAPIRoutes(r, db, workspaceRoot, providers, openAIKey, secretKey, providerMap)
+	registerAPIRoutes(r, db, workspaceRoot, providers, openAIKey, anthropicKey, secretKey, providerMap)
 	mountUI(r)
 
 	s.r = r

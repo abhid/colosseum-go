@@ -1,4 +1,4 @@
-import type { Agent, Artifact, ChatMessage, ChatSession, ProviderInfo, Run, RunEvent, RunTelemetry, ToolDef } from './types'
+import type { Agent, Artifact, ChatMessage, ChatSession, ProviderConfig, ProviderConfigTestResult, ProviderInfo, Run, RunEvent, RunTelemetry, ToolDef } from './types'
 
 const jsonHeaders = { 'Content-Type': 'application/json' }
 
@@ -95,10 +95,14 @@ export const api = {
   listSecrets: () => request<Array<Record<string, unknown>>>('/api/secrets'),
   createSecret: (body: { name: string; value: string }) => request<{ name: string }>('/api/secrets', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
   deleteSecret: (name: string) => request<{ deleted: boolean }>(`/api/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
-  listProviderConfigs: () => request<Array<Record<string, unknown>>>('/api/provider-configs'),
-  createProviderConfig: (body: Record<string, unknown>) => request<{ id: string }>('/api/provider-configs', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
-  updateProviderConfig: (id: string, body: Record<string, unknown>) => request<{ id: string }>(`/api/provider-configs/${id}`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }),
+  listProviderConfigs: () => request<ProviderConfig[]>('/api/provider-configs'),
+  createProviderConfig: (body: { provider: string; name: string; config: unknown }) =>
+    request<{ id: string }>('/api/provider-configs', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
+  updateProviderConfig: (id: string, body: { provider: string; name: string; config: unknown }) =>
+    request<{ id: string }>(`/api/provider-configs/${id}`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }),
   deleteProviderConfig: (id: string) => request<{ deleted: boolean }>(`/api/provider-configs/${id}`, { method: 'DELETE' }),
+  testProviderConfig: (id: string) =>
+    request<ProviderConfigTestResult>(`/api/provider-configs/${id}/test`, { method: 'POST' }),
   listEnvironments: () => request<Array<Record<string, unknown>>>('/api/environments'),
   createEnvironment: (body: Record<string, unknown>) => request<{ id: string }>('/api/environments', { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
   updateEnvironment: (id: string, body: Record<string, unknown>) => request<{ id: string }>(`/api/environments/${id}`, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) }),

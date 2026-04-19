@@ -90,6 +90,7 @@ func registerAPIRoutes(
 	workspaceRoot string,
 	availableProviders map[string]bool,
 	openAIKey string,
+	anthropicKey string,
 	secretKey string,
 	providerMap map[string]providers.Client,
 ) {
@@ -139,6 +140,7 @@ func registerAPIRoutes(
 		r.Post("/provider-configs", createProviderConfigHandler(db))
 		r.Put("/provider-configs/{id}", updateProviderConfigHandler(db))
 		r.Delete("/provider-configs/{id}", deleteProviderConfigHandler(db))
+		r.Post("/provider-configs/{id}/test", testProviderConfigHandler(db, openAIKey, anthropicKey))
 		r.Get("/environments", listEnvironmentsHandler(db))
 		r.Post("/environments", createEnvironmentHandler(db))
 		r.Put("/environments/{id}", updateEnvironmentHandler(db))
@@ -1578,6 +1580,112 @@ func deleteProviderConfigHandler(db *sql.DB) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 	}
+}
+
+func testProviderConfigHandler(db *sql.DB, openAIKey, anthropicKey string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		var provider, configJSON string
+		row := db.QueryRowContext(r.Context(), `SELECT provider, config_json FROM provider_configs WHERE id=?`, id)
+		if err := row.Scan(&provider, &configJSON); err != nil {
+			if err == sql.ErrNoRows {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "provider config not found"})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		cfg := map[string]any{}
+		if strings.TrimSpace(configJSON) != "" {
+			if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "config_json is not valid JSON"})
+				return
+			}
+		}
+		apiKey := strings.TrimSpace(stringFromAny(cfg["api_key"]))
+		baseURL := strings.TrimSpace(stringFromAny(cfg["base_url"]))
+
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+
+		providerLower := strings.ToLower(strings.TrimSpace(provider))
+		var url, effectiveKey, authHeader string
+		switch providerLower {
+		case "openai":
+			if baseURL == "" {
+				baseURL = "https://api.openai.com"
+			}
+			url = strings.TrimRight(baseURL, "/") + "/v1/models"
+			if apiKey == "" {
+				apiKey = openAIKey
+			}
+			if apiKey == "" {
+				writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "no api_key configured and OPENAI_API_KEY is not set", "latency_ms": 0})
+				return
+			}
+			effectiveKey = apiKey
+			authHeader = "Bearer " + effectiveKey
+		case "anthropic":
+			if baseURL == "" {
+				baseURL = "https://api.anthropic.com"
+			}
+			url = strings.TrimRight(baseURL, "/") + "/v1/models"
+			if apiKey == "" {
+				apiKey = anthropicKey
+			}
+			if apiKey == "" {
+				writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": "no api_key configured and ANTHROPIC_API_KEY is not set", "latency_ms": 0})
+				return
+			}
+			effectiveKey = apiKey
+		default:
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("unsupported provider %q", provider)})
+			return
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": err.Error(), "latency_ms": 0})
+			return
+		}
+		if providerLower == "anthropic" {
+			req.Header.Set("x-api-key", effectiveKey)
+			req.Header.Set("anthropic-version", "2023-06-01")
+		} else {
+			req.Header.Set("Authorization", authHeader)
+		}
+
+		start := time.Now()
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		elapsed := time.Since(start).Milliseconds()
+		if err != nil {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": err.Error(), "latency_ms": elapsed})
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+			msg := fmt.Sprintf("HTTP %d", resp.StatusCode)
+			if len(body) > 0 {
+				msg = fmt.Sprintf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": msg, "latency_ms": elapsed})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "reachable", "latency_ms": elapsed})
+	}
+}
+
+func stringFromAny(v any) string {
+	if v == nil {
+		return ""
+	}
+	s, ok := v.(string)
+	if !ok {
+		return ""
+	}
+	return s
 }
 
 func listEnvironmentsHandler(db *sql.DB) http.HandlerFunc {

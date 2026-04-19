@@ -107,6 +107,21 @@ export type ProviderInfo = {
   supports_streaming: boolean
 }
 
+export type ProviderConfig = {
+  id: string
+  provider: string
+  name: string
+  config_json: string
+  created_at: string
+  updated_at: string
+}
+
+export type ProviderConfigTestResult = {
+  ok: boolean
+  message: string
+  latency_ms: number
+}
+
 export type RunStep = {
   id: string
   idx: number
