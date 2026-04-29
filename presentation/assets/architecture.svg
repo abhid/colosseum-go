@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" role="img" aria-label="Colosseum architecture">
+  <style>
+    .box { fill: #1b1e25; stroke: #2a2f3a; stroke-width: 1.5; rx: 10; ry: 10; }
+    .box-accent { fill: #1b1e25; stroke: #f59e0b; stroke-width: 2; rx: 10; ry: 10; }
+    .label { fill: #e6e8eb; font: 500 16px 'Inter', system-ui, sans-serif; }
+    .sublabel { fill: #9aa3b2; font: 400 12px 'Inter', system-ui, sans-serif; }
+    .arrow { stroke: #6b7280; stroke-width: 1.5; fill: none; marker-end: url(#arrowhead); }
+    .arrow-accent { stroke: #f59e0b; stroke-width: 2; fill: none; marker-end: url(#arrowhead-accent); }
+    .store { fill: #0f1115; stroke: #2a2f3a; stroke-width: 1.5; rx: 10; ry: 10; }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M 0 0 L 9 3 L 0 6 z" fill="#6b7280" />
+    </marker>
+    <marker id="arrowhead-accent" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M 0 0 L 9 3 L 0 6 z" fill="#f59e0b" />
+    </marker>
+  </defs>
+
+  <!-- Operator UI -->
+  <rect class="box" x="30" y="170" width="170" height="72" />
+  <text class="label" x="115" y="202" text-anchor="middle">Operator UI</text>
+  <text class="sublabel" x="115" y="222" text-anchor="middle">React · SSE client</text>
+
+  <!-- API + SSE -->
+  <rect class="box-accent" x="260" y="170" width="170" height="72" />
+  <text class="label" x="345" y="202" text-anchor="middle">HTTP API + SSE</text>
+  <text class="sublabel" x="345" y="222" text-anchor="middle">auth · policy enforcement</text>
+
+  <!-- Runtime Manager -->
+  <rect class="box-accent" x="490" y="170" width="190" height="72" />
+  <text class="label" x="585" y="202" text-anchor="middle">Runtime Manager</text>
+  <text class="sublabel" x="585" y="222" text-anchor="middle">steps · contracts · replay</text>
+
+  <!-- Provider adapters (top) -->
+  <rect class="box" x="740" y="70" width="190" height="60" />
+  <text class="label" x="835" y="96" text-anchor="middle">Provider adapters</text>
+  <text class="sublabel" x="835" y="114" text-anchor="middle">OpenAI · Anthropic</text>
+
+  <!-- Policy (mid-top) -->
+  <rect class="box" x="740" y="150" width="190" height="44" />
+  <text class="label" x="835" y="178" text-anchor="middle">Policy engine</text>
+
+  <!-- Tools (mid-bottom) -->
+  <rect class="box" x="740" y="214" width="190" height="60" />
+  <text class="label" x="835" y="240" text-anchor="middle">Tool executor</text>
+  <text class="sublabel" x="835" y="258" text-anchor="middle">shell · files · web · browser</text>
+
+  <!-- Stores -->
+  <rect class="store" x="300" y="310" width="150" height="56" />
+  <text class="label" x="375" y="336" text-anchor="middle">SQLite</text>
+  <text class="sublabel" x="375" y="354" text-anchor="middle">runs · events · spans</text>
+
+  <rect class="store" x="490" y="310" width="190" height="56" />
+  <text class="label" x="585" y="336" text-anchor="middle">Artifact store</text>
+  <text class="sublabel" x="585" y="354" text-anchor="middle">files · screenshots · patches</text>
+
+  <!-- Arrows -->
+  <path class="arrow" d="M 200 206 L 258 206" />
+  <path class="arrow-accent" d="M 430 206 L 488 206" />
+  <path class="arrow" d="M 680 196 L 738 120" />
+  <path class="arrow" d="M 680 206 L 738 172" />
+  <path class="arrow" d="M 680 216 L 738 244" />
+  <path class="arrow" d="M 555 244 L 420 308" />
+  <path class="arrow" d="M 620 244 L 585 308" />
+
+  <!-- Legend band -->
+  <text class="sublabel" x="30" y="400">Core principle: LLM for synthesis, deterministic code for guarantees.</text>
+</svg>

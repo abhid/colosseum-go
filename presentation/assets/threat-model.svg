@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 360" role="img" aria-label="Three agent failure modes">
+  <style>
+    .card { fill: #1b1e25; stroke: #2a2f3a; stroke-width: 1.5; rx: 12; ry: 12; }
+    .card-danger { fill: #1b1e25; stroke: #ef4444; stroke-width: 2; rx: 12; ry: 12; }
+    .title { fill: #ffffff; font: 600 18px 'Inter', system-ui, sans-serif; }
+    .body { fill: #e6e8eb; font: 400 13px 'Inter', system-ui, sans-serif; }
+    .chip { fill: #0f1115; stroke: #2a2f3a; stroke-width: 1; rx: 999px; ry: 999px; }
+    .chip-text { fill: #f59e0b; font: 500 10px 'Inter', system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; }
+    .arrow { stroke: #6b7280; stroke-width: 1.5; fill: none; marker-end: url(#arr); }
+    .danger-text { fill: #ef4444; font: 500 12px 'Inter', system-ui, sans-serif; }
+  </style>
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <path d="M 0 0 L 9 3 L 0 6 z" fill="#6b7280" />
+    </marker>
+  </defs>
+
+  <!-- Card 1: Prompt injection -->
+  <rect class="card-danger" x="30" y="40" width="290" height="280" />
+  <rect class="chip" x="48" y="58" width="120" height="22" />
+  <text class="chip-text" x="108" y="73" text-anchor="middle">failure mode 1</text>
+  <text class="title" x="48" y="110">Prompt injection</text>
+  <text class="body" x="48" y="140">A crafted input hijacks the</text>
+  <text class="body" x="48" y="158">agent's instructions — and</text>
+  <text class="body" x="48" y="176">the agent still holds the</text>
+  <text class="body" x="48" y="194">tokens, keys, and tools you</text>
+  <text class="body" x="48" y="212">gave it.</text>
+  <text class="danger-text" x="48" y="258">→ data exfiltration</text>
+  <text class="danger-text" x="48" y="278">→ lateral tool abuse</text>
+  <text class="danger-text" x="48" y="298">→ credential theft</text>
+
+  <!-- Card 2: Overreach -->
+  <rect class="card-danger" x="340" y="40" width="290" height="280" />
+  <rect class="chip" x="358" y="58" width="120" height="22" />
+  <text class="chip-text" x="418" y="73" text-anchor="middle">failure mode 2</text>
+  <text class="title" x="358" y="110">Tool overreach</text>
+  <text class="body" x="358" y="140">The agent takes an action it</text>
+  <text class="body" x="358" y="158">was technically allowed to</text>
+  <text class="body" x="358" y="176">take, but never should have —</text>
+  <text class="body" x="358" y="194">irreversible by the time a</text>
+  <text class="body" x="358" y="212">human sees it.</text>
+  <text class="danger-text" x="358" y="258">→ destructive shell calls</text>
+  <text class="danger-text" x="358" y="278">→ mutations in prod</text>
+  <text class="danger-text" x="358" y="298">→ payments · deletions</text>
+
+  <!-- Card 3: Opaque execution -->
+  <rect class="card-danger" x="650" y="40" width="290" height="280" />
+  <rect class="chip" x="668" y="58" width="120" height="22" />
+  <text class="chip-text" x="728" y="73" text-anchor="middle">failure mode 3</text>
+  <text class="title" x="668" y="110">Opaque execution</text>
+  <text class="body" x="668" y="140">The run is over, the answer</text>
+  <text class="body" x="668" y="158">was wrong, and there is no</text>
+  <text class="body" x="668" y="176">execution graph to review —</text>
+  <text class="body" x="668" y="194">only a chat transcript and</text>
+  <text class="body" x="668" y="212">circumstantial logs.</text>
+  <text class="danger-text" x="668" y="258">→ unreproducible incidents</text>
+  <text class="danger-text" x="668" y="278">→ no audit trail</text>
+  <text class="danger-text" x="668" y="298">→ silent regressions</text>
+</svg>
