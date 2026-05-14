@@ -1,4 +1,5 @@
 BINARY=colosseum
+GO_PACKAGES=./cmd/... ./internal/...
 
 .PHONY: build test test-go test-ui lint lint-go lint-ui check run ui-install ui-build dev tidy clean
 
@@ -8,7 +9,7 @@ build: ui-build
 test: test-go test-ui
 
 test-go:
-	go test ./...
+	go test $(GO_PACKAGES)
 
 test-ui:
 	npm --prefix ui run test
@@ -16,7 +17,7 @@ test-ui:
 lint: lint-go lint-ui
 
 lint-go:
-	go vet ./...
+	go vet $(GO_PACKAGES)
 
 lint-ui:
 	npm --prefix ui run lint
@@ -36,7 +37,7 @@ ui-build:
 	cp -r ui/dist/. internal/api/ui/dist/
 
 dev:
-	concurrently "go run ./cmd/colosseum server" "npm --prefix ui run dev"
+	( go run ./cmd/colosseum server & trap 'kill $$!' INT TERM EXIT; npm --prefix ui run dev )
 
 tidy:
 	go mod tidy

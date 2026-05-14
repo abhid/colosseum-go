@@ -1,7 +1,7 @@
 import { Link, NavLink } from 'react-router-dom'
 import { IconRobot, IconPlayerPlay, IconScale, IconShieldCheck, IconTool, IconCloud, IconLock, IconMessageCircle, IconFileDescription } from '@tabler/icons-react'
 import type { PropsWithChildren } from 'react'
-import colosseumLogo from '../assets/colosseum-logo.png'
+import colosseumLogo from '../assets/colosseum-logo.svg'
 import { CANVAS_BG, FOCUS_RING } from '../lib/tokens'
 
 const nav = [

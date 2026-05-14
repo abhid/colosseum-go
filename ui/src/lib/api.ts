@@ -77,8 +77,20 @@ export const api = {
   patchChatSession: (id: string, body: { title?: string; archived?: boolean; pinned?: boolean }) =>
     request<{ id: string; updated: boolean }>(`/api/chat/sessions/${id}`, { method: 'PATCH', headers: jsonHeaders, body: JSON.stringify(body) }),
   listChatMessages: (id: string) => request<ChatMessage[]>(`/api/chat/sessions/${id}/messages`),
-  sendChatMessage: (id: string, body: { content: string; source?: string }) =>
-    request<{ session_id: string; run_id: string; turn_index: number; status: string }>(`/api/chat/sessions/${id}/messages`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify(body) }),
+  sendChatMessage: async (id: string, body: { content: string; source?: string; files?: File[] }) => {
+    if (body.files && body.files.length > 0) {
+      const form = new FormData()
+      form.append('content', body.content)
+      if (body.source) form.append('source', body.source)
+      for (const file of body.files) form.append('files', file, file.name)
+      const res = await fetch(`/api/chat/sessions/${id}/messages`, { method: 'POST', body: form })
+      if (!res.ok) {
+        throw new Error(await parseErrorMessage(res))
+      }
+      return res.json() as Promise<{ session_id: string; run_id: string; turn_index: number; status: string; uploaded?: Array<Record<string, unknown>> }>
+    }
+    return request<{ session_id: string; run_id: string; turn_index: number; status: string }>(`/api/chat/sessions/${id}/messages`, { method: 'POST', headers: jsonHeaders, body: JSON.stringify({ content: body.content, source: body.source }) })
+  },
   uploadChatAttachments: async (id: string, files: File[]) => {
     const form = new FormData()
     for (const file of files) form.append('files', file, file.name)

@@ -84,7 +84,7 @@ presentation/
 ├── css/theme.css           # Colosseum palette overrides on reveal's black base
 ├── js/config.js            # reveal init + ?demo=<url> handling + healthz ping
 ├── assets/
-│   ├── logo.png            # from ui/src/assets/colosseum-logo.png
+│   ├── logo.svg            # presentation logo matching ui/src/assets/colosseum-logo.svg
 │   ├── architecture.svg    # simplified architecture diagram
 │   └── threat-model.svg    # three-failure-mode illustration
 ├── .nojekyll               # GitHub Pages: skip Jekyll

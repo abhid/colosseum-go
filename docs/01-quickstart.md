@@ -7,7 +7,7 @@ This guide gets `colosseum` running locally in minutes.
 - Linux host (x86_64 or arm64)
 - Docker daemon available to the current user
 - Go toolchain compatible with this repository
-- Node.js + npm (only required for UI development or rebuilding UI assets)
+- Node.js + npm (`make build` embeds freshly built UI assets)
 - At least one model provider key:
   - `OPENAI_API_KEY`
   - `ANTHROPIC_API_KEY`
@@ -39,6 +39,9 @@ Notes:
 
 - Default listen IP is `0.0.0.0` (all interfaces).
 - Environment variables can come from shell exports or `.env` / `.env.local`.
+- Copy `.env.example` to `.env.local` for local development defaults.
+- Set `COLOSSEUM_API_AUTH_TOKEN` before exposing the server beyond localhost.
+- Set `COLOSSEUM_SECRET_KEY` before using secrets or credential vaults.
 
 ## First End-to-End Run
 

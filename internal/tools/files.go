@@ -61,7 +61,7 @@ func (e *Executor) fileSearch(ctx context.Context, runCtx Context, input json.Ra
 	}
 	args := []string{"-n", req.Pattern, "."}
 	if req.Glob != "" {
-		args = append([]string{"-n", "--glob", req.Glob, req.Pattern, "."})
+		args = []string{"-n", "--glob", req.Glob, req.Pattern, "."}
 	}
 	cmd := exec.CommandContext(ctx, "rg", args...)
 	cmd.Dir = runCtx.Workspace

@@ -2,7 +2,12 @@ package policy
 
 import (
 	"encoding/json"
+	"fmt"
+	"net"
+	"net/netip"
+	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -52,11 +57,9 @@ func EvaluateTool(toolName string, input json.RawMessage, allowed []string) Deci
 			URL string `json:"url"`
 		}
 		_ = json.Unmarshal(input, &req)
-		if strings.Contains(req.URL, "169.254.169.254") || strings.HasPrefix(strings.ToLower(req.URL), "file://") {
-			return Decision{Allow: false, Reason: "blocked url scheme/host"}
-		}
-		if strings.Contains(req.URL, "localhost") || strings.Contains(req.URL, "127.0.0.1") {
-			return Decision{Allow: true, RequireApproval: true, Reason: "local network access requires approval"}
+		decision := evaluateURLTarget(req.URL, "local network access requires approval")
+		if decision.Reason != "" {
+			return decision
 		}
 	}
 
@@ -71,14 +74,82 @@ func EvaluateTool(toolName string, input json.RawMessage, allowed []string) Deci
 				URL string `json:"url"`
 			}
 			_ = json.Unmarshal(input, &req)
-			if strings.HasPrefix(strings.ToLower(req.URL), "file://") {
-				return Decision{Allow: false, Reason: "file scheme blocked for browser"}
-			}
-			if strings.Contains(req.URL, "localhost") || strings.Contains(req.URL, "127.0.0.1") {
-				return Decision{Allow: true, RequireApproval: true, Reason: "local browser target requires approval"}
+			decision := evaluateURLTarget(req.URL, "local browser target requires approval")
+			if decision.Reason != "" {
+				return decision
 			}
 		}
 	}
 
 	return Decision{Allow: true}
+}
+
+func evaluateURLTarget(rawURL, approvalReason string) Decision {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Scheme == "" {
+		return Decision{Allow: false, Reason: "invalid url"}
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return Decision{Allow: false, Reason: "blocked url scheme"}
+	}
+	host := strings.TrimSpace(u.Hostname())
+	if host == "" {
+		return Decision{Allow: false, Reason: "missing url host"}
+	}
+	if isMetadataHost(host) {
+		return Decision{Allow: false, Reason: "blocked metadata service host"}
+	}
+	if isLocalOrPrivateHost(host) {
+		return Decision{Allow: true, RequireApproval: true, Reason: approvalReason}
+	}
+	return Decision{}
+}
+
+func isMetadataHost(host string) bool {
+	normalized := strings.Trim(strings.ToLower(host), "[]")
+	return normalized == "169.254.169.254" || normalized == "metadata.google.internal"
+}
+
+func isLocalOrPrivateHost(host string) bool {
+	normalized := strings.Trim(strings.ToLower(host), "[]")
+	if normalized == "localhost" || strings.HasSuffix(normalized, ".localhost") {
+		return true
+	}
+	if ip := parseHostIP(normalized); ip.IsValid() {
+		return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified()
+	}
+	addrs, err := net.LookupIP(normalized)
+	if err != nil {
+		return false
+	}
+	for _, addr := range addrs {
+		if ip, err := netip.ParseAddr(addr.String()); err == nil {
+			if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func parseHostIP(host string) netip.Addr {
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return ip
+	}
+	if parsed := net.ParseIP(host); parsed != nil {
+		if ip, err := netip.ParseAddr(parsed.String()); err == nil {
+			return ip
+		}
+	}
+	if strings.HasPrefix(host, "0x") {
+		var n uint32
+		if _, err := fmt.Sscanf(host, "0x%x", &n); err == nil {
+			return netip.AddrFrom4([4]byte{byte(n >> 24), byte(n >> 16), byte(n >> 8), byte(n)})
+		}
+	}
+	if n, err := strconv.ParseUint(host, 10, 32); err == nil {
+		return netip.AddrFrom4([4]byte{byte(n >> 24), byte(n >> 16), byte(n >> 8), byte(n)})
+	}
+	return netip.Addr{}
 }

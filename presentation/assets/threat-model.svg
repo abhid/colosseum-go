@@ -1,17 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 360" role="img" aria-label="Three agent failure modes">
   <style>
-    .card { fill: #1b1e25; stroke: #2a2f3a; stroke-width: 1.5; rx: 12; ry: 12; }
-    .card-danger { fill: #1b1e25; stroke: #ef4444; stroke-width: 2; rx: 12; ry: 12; }
-    .title { fill: #ffffff; font: 600 18px 'Inter', system-ui, sans-serif; }
-    .body { fill: #e6e8eb; font: 400 13px 'Inter', system-ui, sans-serif; }
-    .chip { fill: #0f1115; stroke: #2a2f3a; stroke-width: 1; rx: 999px; ry: 999px; }
-    .chip-text { fill: #f59e0b; font: 500 10px 'Inter', system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; }
-    .arrow { stroke: #6b7280; stroke-width: 1.5; fill: none; marker-end: url(#arr); }
-    .danger-text { fill: #ef4444; font: 500 12px 'Inter', system-ui, sans-serif; }
+    .card { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; rx: 12; ry: 12; }
+    .card-danger { fill: #ffffff; stroke: #dc2626; stroke-width: 2; rx: 12; ry: 12; }
+    .title { fill: #0f172a; font: 600 18px 'Inter', system-ui, sans-serif; }
+    .body { fill: #334155; font: 400 13px 'Inter', system-ui, sans-serif; }
+    .chip { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1; rx: 999px; ry: 999px; }
+    .chip-text { fill: #d97706; font: 500 10px 'Inter', system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; }
+    .arrow { stroke: #64748b; stroke-width: 1.5; fill: none; marker-end: url(#arr); }
+    .danger-text { fill: #dc2626; font: 500 12px 'Inter', system-ui, sans-serif; }
   </style>
   <defs>
     <marker id="arr" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-      <path d="M 0 0 L 9 3 L 0 6 z" fill="#6b7280" />
+      <path d="M 0 0 L 9 3 L 0 6 z" fill="#64748b" />
     </marker>
   </defs>
 

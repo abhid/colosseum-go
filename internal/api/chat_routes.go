@@ -244,6 +244,10 @@ func listChatSessionMessagesHandler(db *sql.DB) http.HandlerFunc {
 func createChatSessionMessageHandler(db *sql.DB, workspaceRoot string, providerMap map[string]providers.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sessionID := chi.URLParam(r, "id")
+		if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
+			handleMultipartChatSessionMessage(w, r, db, workspaceRoot, providerMap, sessionID)
+			return
+		}
 		var req createChatSessionMessageRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
@@ -264,7 +268,7 @@ func createChatSessionMessageHandler(db *sql.DB, workspaceRoot string, providerM
 			}
 		}
 
-		runID, turnIndex, err := createRunForSessionMessage(r.Context(), db, workspaceRoot, sessionID, req.Content)
+		runID, turnIndex, err := createRunForSessionMessage(r.Context(), db, workspaceRoot, sessionID, req.Content, "queued")
 		if err != nil {
 			status := http.StatusInternalServerError
 			if errors.Is(err, sql.ErrNoRows) {
@@ -280,6 +284,52 @@ func createChatSessionMessageHandler(db *sql.DB, workspaceRoot string, providerM
 		})
 		go maybeGenerateChatSessionTitle(context.Background(), db, providerMap, sessionID, turnIndex)
 	}
+}
+
+func handleMultipartChatSessionMessage(w http.ResponseWriter, r *http.Request, db *sql.DB, workspaceRoot string, providerMap map[string]providers.Client, sessionID string) {
+	if err := r.ParseMultipartForm(64 << 20); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errInvalidMultipartPayload.Error()})
+		return
+	}
+	content := strings.TrimSpace(r.FormValue("content"))
+	if content == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": errChatMessageContentNeeded.Error()})
+		return
+	}
+	runID, turnIndex, err := createRunForSessionMessage(r.Context(), db, workspaceRoot, sessionID, content, "preparing")
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, sql.ErrNoRows) {
+			status = http.StatusNotFound
+		} else if errors.Is(err, errChatSessionArchived) || errors.Is(err, errChatMessageContentNeeded) || errors.Is(err, errWorkspacePathOutsideRoot) {
+			status = http.StatusBadRequest
+		}
+		writeJSON(w, status, map[string]string{"error": err.Error()})
+		return
+	}
+	uploaded, uploadErr := uploadFilesToRun(r.Context(), db, r, runID)
+	if uploadErr != nil && !errors.Is(uploadErr, errNoFilesUploaded) {
+		now := time.Now().UTC().Format(time.RFC3339Nano)
+		_, _ = db.ExecContext(r.Context(), `UPDATE runs SET status='failed', error=?, completed_at=?, updated_at=? WHERE id=?`, uploadErr.Error(), now, now, runID)
+		code := http.StatusInternalServerError
+		if errors.Is(uploadErr, errInvalidMultipartPayload) || errors.Is(uploadErr, errNoFilesUploaded) {
+			code = http.StatusBadRequest
+		} else if errors.Is(uploadErr, errRunClosedForUploads) || errors.Is(uploadErr, errRunNotFound) {
+			code = http.StatusConflict
+		}
+		writeJSON(w, code, map[string]string{"error": uploadErr.Error()})
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if _, err := db.ExecContext(r.Context(), `UPDATE runs SET status='queued', updated_at=? WHERE id=? AND status='preparing'`, now, runID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to queue run"})
+		return
+	}
+	_, _ = appendEventWithRetry(r.Context(), db, runID, "", "run.queued", map[string]any{"status": "queued"})
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"session_id": sessionID, "run_id": runID, "turn_index": turnIndex, "status": "queued", "uploaded": uploaded,
+	})
+	go maybeGenerateChatSessionTitle(context.Background(), db, providerMap, sessionID, turnIndex)
 }
 
 func uploadChatSessionAttachmentsHandler(db *sql.DB) http.HandlerFunc {
@@ -368,7 +418,7 @@ func executeChatSlashCommand(ctx context.Context, db *sql.DB, sessionID, raw str
 	}
 }
 
-func createRunForSessionMessage(ctx context.Context, db *sql.DB, workspaceRoot, sessionID, content string) (string, int, error) {
+func createRunForSessionMessage(ctx context.Context, db *sql.DB, workspaceRoot, sessionID, content, initialStatus string) (string, int, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", 0, err
@@ -452,16 +502,24 @@ func createRunForSessionMessage(ctx context.Context, db *sql.DB, workspaceRoot, 
 	if maxSteps <= 0 {
 		maxSteps = 30
 	}
+	initialStatus = strings.TrimSpace(strings.ToLower(initialStatus))
+	if initialStatus == "" {
+		initialStatus = "queued"
+	}
+	if initialStatus != "queued" && initialStatus != "preparing" {
+		return "", 0, fmt.Errorf("invalid initial run status: %s", initialStatus)
+	}
 	if err := validateOutputContractDefinition(outputContractType, outputContractPayload); err != nil {
 		return "", 0, err
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runs(id,agent_id,status,task,workspace_path,provider,model,max_steps,replay_source_run_id,replay_from_step,environment_id,credential_vault_id,output_contract_type,output_contract_payload,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-	`, runID, agentID, "queued", content, workspacePath, provider, model, maxSteps, prevRunID, replayFromStep, environmentID, vaultID, normalizeOutputContractType(outputContractType), strings.TrimSpace(outputContractPayload), now, now); err != nil {
+	`, runID, agentID, initialStatus, content, workspacePath, provider, model, maxSteps, prevRunID, replayFromStep, environmentID, vaultID, normalizeOutputContractType(outputContractType), strings.TrimSpace(outputContractPayload), now, now); err != nil {
 		return "", 0, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO events(id,run_id,event_type,seq,payload_json,created_at) VALUES(?,?,?,?,?,?)`, uuid.NewString(), runID, "run.created", 1, `{"status":"queued"}`, now); err != nil {
+	createdPayload, _ := json.Marshal(map[string]any{"status": initialStatus})
+	if _, err := tx.ExecContext(ctx, `INSERT INTO events(id,run_id,event_type,seq,payload_json,created_at) VALUES(?,?,?,?,?,?)`, uuid.NewString(), runID, "run.created", 1, string(createdPayload), now); err != nil {
 		return "", 0, err
 	}
 	var nextTurn int

@@ -29,6 +29,8 @@ Precedence:
 - `COLOSSEUM_DB_PATH` (default: `./colosseum.db`)
 - `COLOSSEUM_ARTIFACT_PATH` (default: `./artifacts`)
 - `COLOSSEUM_WORKSPACE_ROOT` (default: `./workspaces`)
+- `COLOSSEUM_API_AUTH_TOKEN` (recommended for any non-local deployment)
+- `COLOSSEUM_SECRET_KEY` (required before storing secrets)
 - `COLOSSEUM_DEFAULT_MODEL`
 - `COLOSSEUM_DOCKER_IMAGE` (tool/docker execution image for applicable workloads)
 - `DOCKER_HOST` (optional custom docker daemon)
@@ -81,4 +83,7 @@ Recommendation: pin image version explicitly to match installed Playwright.
 - process user can read/write DB, artifact root, workspace root
 - docker daemon reachable for docker-backed tools
 - provider keys available when provider-backed features are expected
+- API auth token configured before binding to a shared network interface
+- secret key configured and backed up before creating secrets or credential vault bindings
+- DB, artifact, and workspace directories included in the backup plan
 

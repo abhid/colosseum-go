@@ -15,9 +15,9 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Go vet
-        run: go vet ./...
+        run: go vet ./cmd/... ./internal/...
       - name: Go test
-        run: go test ./...
+        run: go test ./cmd/... ./internal/...
 
   ui:
     runs-on: ubuntu-latest
@@ -39,3 +39,20 @@ jobs:
         run: npm run test
       - name: Build
         run: npm run build
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - name: Install UI dependencies
+        run: npm --prefix ui ci
+      - name: Build embedded binary
+        run: make build

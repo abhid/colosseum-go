@@ -34,6 +34,7 @@ Built-ins are upserted at startup and treated as immutable in UI/API.
 ### Web and JSON
 
 - `web.fetch`
+- `http.request`
 - `json.parse`
 - `json.query`
 
@@ -44,12 +45,37 @@ Built-ins are upserted at startup and treated as immutable in UI/API.
 - `browser.action`
 - `browser.wait`
 - `browser.close`
+- `browser.screenshot`
 
 ### Run Artifacts and Utility
 
 - `artifact.list`
 - `artifact.get`
+- `recall_artifact`
 - `test.run`
+- `clock.now`
+- `env.inspect`
+- `approval.request`
+
+### Session Memory and Process Control
+
+- `scratchpad.write`
+- `scratchpad.read`
+- `scratchpad.delete`
+- `process.run_background`
+- `process.logs`
+- `process.kill`
+
+### Delegation and Planning
+
+- `subagent.spawn`
+- `subagent.status`
+- `subagent.wait`
+- `plan.set`
+- `plan.update_step`
+- `plan.update_steps`
+- `plan.add_step`
+- `plan.read`
 
 ## Browser Runtime Details
 
@@ -74,6 +100,8 @@ Key config:
 
 - `command_template` with `{{param}}` placeholders
 - `timeout_seconds`
+
+Treat custom shell templates as privileged: placeholder values are rendered into a shell command string, so only trusted operators should create or enable them.
 
 Execution flow:
 
@@ -117,6 +145,7 @@ Output:
 
 - stored in `secrets`
 - list endpoints do not return secret plaintext
+- creating or updating secrets requires `COLOSSEUM_SECRET_KEY`
 
 ### Provider Configs
 

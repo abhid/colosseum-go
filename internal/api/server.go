@@ -124,7 +124,7 @@ func timeoutExceptStream(d time.Duration) func(http.Handler) http.Handler {
 func apiAuthMiddleware(apiAuthToken string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/api/stream/") {
+			if !strings.HasPrefix(r.URL.Path, "/api/") {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -132,6 +132,11 @@ func apiAuthMiddleware(apiAuthToken string) func(http.Handler) http.Handler {
 			token := strings.TrimSpace(strings.TrimPrefix(authz, "Bearer "))
 			if token == "" {
 				token = strings.TrimSpace(r.Header.Get("X-API-Token"))
+			}
+			if token == "" && strings.HasPrefix(r.URL.Path, "/api/stream/") {
+				// Native EventSource cannot set Authorization headers, so allow
+				// an explicit stream token when API auth is enabled.
+				token = strings.TrimSpace(r.URL.Query().Get("access_token"))
 			}
 			if token != strings.TrimSpace(apiAuthToken) {
 				writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})

@@ -26,12 +26,14 @@ This guide summarizes the current operational security posture and runtime relia
 
 - provider credentials are supplied via environment variables
 - secrets store endpoints do not leak plaintext in list views
+- creating secrets requires `COLOSSEUM_SECRET_KEY`
 - dynamic provider visibility reduces accidental misconfiguration in UI
 
 ### Network/Data Guardrails
 
 - web/browser tools include host/scheme validation paths
 - local/metadata targets can be blocked or approval-gated by policy
+- URL checks parse schemes and hosts, recognize common local/private IP forms, and block metadata-service targets
 
 ## Reliability Model
 
@@ -67,6 +69,8 @@ Primary execution history is persisted in SQLite:
 
 - run under a least-privilege OS account
 - isolate DB/artifact/workspace directories with strict permissions
+- set `COLOSSEUM_API_AUTH_TOKEN` for every shared deployment
+- set and back up `COLOSSEUM_SECRET_KEY` before creating secrets
 - use constrained Docker context/profile for agent workloads
 - pin browser image versions to known-good builds
 - rotate provider credentials and audit environment handling

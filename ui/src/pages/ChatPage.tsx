@@ -105,10 +105,7 @@ export function ChatPage() {
         const created = await api.createChatSession({ agent_id: agentID.trim(), title: body.slice(0, 120) })
         targetSessionID = created.id
       }
-      const result = await api.sendChatMessage(targetSessionID, { content: body, source: 'chat' })
-      if (pendingFiles.length > 0) {
-        await api.uploadChatAttachments(targetSessionID, pendingFiles)
-      }
+      const result = await api.sendChatMessage(targetSessionID, { content: body, source: 'chat', files: pendingFiles })
       return { ...result, session_id: targetSessionID }
     },
     onSuccess: async (result) => {

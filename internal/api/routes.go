@@ -1975,6 +1975,10 @@ func createSecretHandler(db *sql.DB, secretKey string) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name and value required"})
 			return
 		}
+		if strings.TrimSpace(secretKey) == "" {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "COLOSSEUM_SECRET_KEY is required before storing secrets"})
+			return
+		}
 		id := uuid.NewString()
 		now := time.Now().UTC().Format(time.RFC3339Nano)
 		cipher, err := secrets.Encrypt(req.Value, secretKey)

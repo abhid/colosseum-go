@@ -4,6 +4,8 @@ Base path: `/api`
 
 All endpoints return JSON unless otherwise noted.
 
+When `COLOSSEUM_API_AUTH_TOKEN` is configured, API requests must include `Authorization: Bearer <token>` or `X-API-Token: <token>`. Native EventSource clients may pass `access_token=<token>` for `/api/stream/*`.
+
 ## Health
 
 - `GET /healthz`
@@ -60,6 +62,7 @@ Enhance payload:
 - `GET /runs/{id}/telemetry`
 - `GET /runs/{id}/artifacts`
 - `GET /runs/{id}/artifacts/{artifactID}/content` (raw file content stream)
+- `POST /runs/{id}/files` (multipart `files[]` upload)
 - `GET /runs/{id}/export`
 - `POST /runs/{id}/cancel`
 - `POST /runs/{id}/interrupt`
@@ -86,6 +89,27 @@ Steer event payload example:
   "message": "Continue from the last result and include exact commands used."
 }
 ```
+
+## Chat Sessions
+
+- `GET /chat/sessions`
+- `POST /chat/sessions`
+- `GET /chat/sessions/{id}`
+- `PATCH /chat/sessions/{id}`
+- `GET /chat/sessions/{id}/messages`
+- `POST /chat/sessions/{id}/messages`
+- `POST /chat/sessions/{id}/attachments`
+
+`POST /chat/sessions/{id}/messages` accepts JSON:
+
+```json
+{
+  "content": "Summarize the uploaded screenshot.",
+  "source": "chat"
+}
+```
+
+It also accepts multipart form data with `content` and one or more `files` fields. Multipart chat sends persist attachments before the run is queued for execution.
 
 ## Tools
 
@@ -128,12 +152,32 @@ Custom tool (`shell_command`) example:
 - `POST /secrets`
 - `DELETE /secrets/{name}`
 
+`POST /secrets` requires `COLOSSEUM_SECRET_KEY` on the server.
+
 ## Provider Configs
 
 - `GET /provider-configs`
 - `POST /provider-configs`
 - `PUT /provider-configs/{id}`
 - `DELETE /provider-configs/{id}`
+- `POST /provider-configs/{id}/test`
+
+## Environments
+
+- `GET /environments`
+- `POST /environments`
+- `PUT /environments/{id}`
+- `DELETE /environments/{id}`
+
+## Credential Vaults
+
+- `GET /credential-vaults`
+- `POST /credential-vaults`
+- `PUT /credential-vaults/{id}`
+- `DELETE /credential-vaults/{id}`
+- `GET /credential-vaults/{id}/items`
+- `POST /credential-vaults/{id}/items`
+- `DELETE /credential-vaults/{id}/items/{secretName}`
 
 ## SSE Stream
 

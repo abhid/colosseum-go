@@ -1,19 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" role="img" aria-label="Colosseum architecture">
   <style>
-    .box { fill: #1b1e25; stroke: #2a2f3a; stroke-width: 1.5; rx: 10; ry: 10; }
-    .box-accent { fill: #1b1e25; stroke: #f59e0b; stroke-width: 2; rx: 10; ry: 10; }
-    .label { fill: #e6e8eb; font: 500 16px 'Inter', system-ui, sans-serif; }
-    .sublabel { fill: #9aa3b2; font: 400 12px 'Inter', system-ui, sans-serif; }
-    .arrow { stroke: #6b7280; stroke-width: 1.5; fill: none; marker-end: url(#arrowhead); }
-    .arrow-accent { stroke: #f59e0b; stroke-width: 2; fill: none; marker-end: url(#arrowhead-accent); }
-    .store { fill: #0f1115; stroke: #2a2f3a; stroke-width: 1.5; rx: 10; ry: 10; }
+    .box { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; rx: 10; ry: 10; }
+    .box-accent { fill: #ffffff; stroke: #d97706; stroke-width: 2; rx: 10; ry: 10; }
+    .label { fill: #0f172a; font: 500 16px 'Inter', system-ui, sans-serif; }
+    .sublabel { fill: #475569; font: 400 12px 'Inter', system-ui, sans-serif; }
+    .arrow { stroke: #64748b; stroke-width: 1.5; fill: none; marker-end: url(#arrowhead); }
+    .arrow-accent { stroke: #d97706; stroke-width: 2; fill: none; marker-end: url(#arrowhead-accent); }
+    .store { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; rx: 10; ry: 10; }
   </style>
   <defs>
     <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-      <path d="M 0 0 L 9 3 L 0 6 z" fill="#6b7280" />
+      <path d="M 0 0 L 9 3 L 0 6 z" fill="#64748b" />
     </marker>
     <marker id="arrowhead-accent" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-      <path d="M 0 0 L 9 3 L 0 6 z" fill="#f59e0b" />
+      <path d="M 0 0 L 9 3 L 0 6 z" fill="#d97706" />
     </marker>
   </defs>
 

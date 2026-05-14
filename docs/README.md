@@ -21,4 +21,5 @@ This documentation set is organized by operator journey:
 - [RFC: Chat-First Assistant Roadmap](10-chat-roadmap-rfc.md)
 - [Output Contracts](11-output-contracts.md)
 - [Response and Media Pipeline](12-response-and-media-pipeline.md)
+- [Deployment Notes](13-deployment.md)
 
