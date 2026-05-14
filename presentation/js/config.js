@@ -72,6 +72,7 @@
       center: true,
       transition: 'fade',
       transitionSpeed: 'fast',
+      autoAnimate: true,
       width: 1280,
       height: 800,
       margin: 0.08,

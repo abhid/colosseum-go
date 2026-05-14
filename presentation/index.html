@@ -43,7 +43,7 @@
   </section>
 
   <!-- Slide 2: Speaker overview -->
-  <section class="speaker-slide">
+  <section class="speaker-slide" data-background-color="#ffffff">
     <div class="speaker-intro">
       <img class="speaker-photo" src="assets/abhi-devireddy.jpg" alt="Abhi Devireddy" />
       <div>
@@ -57,15 +57,15 @@
     </div>
 
     <div class="speaker-punchline">
-      <div>
+      <div class="fragment fade-up">
         <span class="risk">side quests</span>
         <p>Building ISPs, agent harnesses, voice agents and interfaces, social assistance bots, cryptanalysis.</p>
       </div>
-      <div>
+      <div class="fragment fade-up">
         <span class="risk">day job lens</span>
         <p>Healthcare infrastructure teaches you quickly: useful automation still needs trust boundaries.</p>
       </div>
-      <div>
+      <div class="fragment fade-up">
         <span class="risk">today</span>
         <p>No AI magic dust. Just agents, authority, blast radius, evidence, and control.</p>
       </div>
@@ -81,15 +81,15 @@
   </section>
 
   <!-- Slide 1a: AI to IA -->
-  <section class="boundary-slide">
+  <section class="boundary-slide" data-auto-animate data-background-gradient="linear-gradient(135deg, #f8fafc 0%, #eef6ff 48%, #f6f0ff 100%)">
     <h2>
       <span class="text-ai">AI</span> generated <span class="text-ai">content</span>.<br/>
       <span class="text-agent">Agents</span> exercise <span class="text-agent">capability</span>.
     </h2>
-    <div class="boundary-thesis">
+    <div class="boundary-thesis fragment fade-up">
       The security boundary moved from <strong>content</strong> to <strong>capability</strong>.
     </div>
-    <p class="boundary-implication">
+    <p class="boundary-implication fragment fade-up">
       The question isn't <em>whether</em> agents will be in your environment.<br/>
       It's <em>whose</em> agents, on <em>whose</em> terms.
     </p>
@@ -111,20 +111,20 @@
   </section>
 
   <!-- Slide 3: Agents are non-deterministic code with credentials -->
-  <section class="actor-slide">
+  <section class="actor-slide" data-auto-animate data-background-gradient="linear-gradient(135deg, #f8fafc 0%, #f7fbff 55%, #faf7ff 100%)">
     <h2><span class="text-agent">Agents</span> are non-deterministic code<br/>with <span class="text-ai">credentials</span>.</h2>
     <div class="actor-stack">
-      <div class="actor-block">
+      <div class="actor-block fragment fade-up">
         <span class="risk">old assumption</span>
         <p>Static review, CI gates, policy-as-code, and audit trails all assume the program is fixed before it runs.</p>
       </div>
-      <div class="actor-block emphasis">
+      <div class="actor-block emphasis fragment fade-up">
         <span class="risk">agent reality</span>
         <p>An agent decides <em>at runtime</em> which tool to call, with what arguments, in what order.</p>
         <p>It holds your tokens. It reads your docs. It can be talked into things.</p>
       </div>
     </div>
-    <p class="actor-thesis">
+    <p class="actor-thesis fragment fade-up">
       You didn't ship an application. You shipped a <strong>process with judgment</strong>.
     </p>
     <aside class="notes">
@@ -139,33 +139,33 @@
   </section>
 
   <!-- Slide 2a: Digital employees -->
-  <section class="governance-slide">
+  <section class="governance-slide" data-auto-animate data-background-gradient="linear-gradient(135deg, #f8fafc 0%, #f7fbff 55%, #faf7ff 100%)">
     <h2>If agents are <span class="text-agent">digital employees</span>,<br/>govern them like <span class="text-ai">employees</span>.</h2>
-    <p class="governance-thesis">
+    <p class="governance-thesis fragment fade-up">
       Give every agent an operating model before you give it access.
     </p>
     <div class="governance-grid">
-      <div class="governance-card primary">
+      <div class="governance-card primary fragment fade-up" data-fragment-index="1">
         <span class="risk">identity</span>
         <p>Who is this agent? What team owns it? What systems does it represent?</p>
       </div>
-      <div class="governance-card primary">
+      <div class="governance-card primary fragment fade-up" data-fragment-index="1">
         <span class="risk">permissions</span>
         <p>What can it read, change, delete, approve, or escalate?</p>
       </div>
-      <div class="governance-card primary">
+      <div class="governance-card primary fragment fade-up" data-fragment-index="1">
         <span class="risk">supervision</span>
         <p>When does it need a manager? What actions require review before execution?</p>
       </div>
-      <div class="governance-card">
+      <div class="governance-card fragment fade-up" data-fragment-index="2">
         <span class="risk">training</span>
         <p>Which policies, playbooks, data, and examples shape its behavior?</p>
       </div>
-      <div class="governance-card">
+      <div class="governance-card fragment fade-up" data-fragment-index="2">
         <span class="risk">audit</span>
         <p>Can we reconstruct every decision and every action after the fact?</p>
       </div>
-      <div class="governance-card">
+      <div class="governance-card fragment fade-up" data-fragment-index="2">
         <span class="risk">offboarding</span>
         <p>Can we revoke its access everywhere when the workflow changes?</p>
       </div>
@@ -184,29 +184,29 @@
 
 
   <!-- Slide 4: Agent speed -->
-  <section class="agent-speed-slide">
+  <section class="agent-speed-slide" data-background-gradient="linear-gradient(135deg, #f8fafc 0%, #f7fbff 48%, #faf7ff 100%)">
     <h2>Humans can&rsquo;t supervise at <span class="text-agent">agent speed</span>.</h2>
     <div class="speed-race">
-      <div class="speed-lane human">
+      <div class="speed-lane human fragment fade-right">
         <span class="risk">human review loop</span>
         <div class="speed-number">1×</div>
         <p>Read the log. Interpret the action. Decide whether it was safe.</p>
       </div>
-      <div class="speed-divider">
+      <div class="speed-divider fragment fade-in">
         <span>vs</span>
       </div>
-      <div class="speed-lane agent">
+      <div class="speed-lane agent fragment fade-left">
         <span class="risk">agent execution loop</span>
         <div class="speed-number">10,000×</div>
         <p>Plan, call tools, observe results, adapt, repeat.</p>
       </div>
     </div>
-    <div class="speed-factors">
+    <div class="speed-factors fragment fade-up">
       <span><strong>speed</strong> faster than observation</span>
       <span><strong>opacity</strong> inside model calls</span>
       <span><strong>novelty</strong> beyond old playbooks</span>
     </div>
-    <p class="agent-speed-thesis">
+    <p class="agent-speed-thesis fragment fade-up">
       This is not a training problem. It is an <strong>architecture problem</strong>.
     </p>
     <aside class="notes">
@@ -222,20 +222,20 @@
   </section>
 
   <!-- Slide 5: Failure modes -->
-  <section class="failure-slide">
+  <section class="failure-slide" data-background-gradient="linear-gradient(135deg, #f8fafc 0%, #fff7f7 48%, #faf7ff 100%)">
     <h2>Three failure modes keep recurring.</h2>
     <div class="failure-layout">
-      <div class="failure-card danger feature">
+      <div class="failure-card danger feature fragment fade-right">
         <h3>Prompt injection</h3>
         <p>Data the agent reads becomes instructions it follows.</p>
         <div class="failure-feature-note">Dangerous because trusted tools are attached.</div>
       </div>
       <div class="failure-secondary">
-        <div class="failure-card">
+        <div class="failure-card fragment fade-left">
           <h3>Tool overreach</h3>
           <p>The agent takes an action it was allowed to take, but never should have.</p>
         </div>
-        <div class="failure-card">
+        <div class="failure-card fragment fade-left">
           <h3>Opaque execution</h3>
           <p>After the run, nobody can reconstruct what actually happened.</p>
         </div>
@@ -258,21 +258,21 @@
   </section>
 
   <!-- Slide 6: Bad answers -->
-  <section class="bad-answers-slide">
+  <section class="bad-answers-slide" data-background-gradient="linear-gradient(135deg, #f8fafc 0%, #f7fbff 48%, #faf7ff 100%)">
     <h2>The bad answers all share the same flaw:<br/><span class="text-agent">they react after trust was already granted.</span></h2>
     <div class="bad-answer-layout">
-      <div class="bad-answer-trap">
+      <div class="bad-answer-trap fragment fade-right">
         <span class="risk">the trap</span>
         <p>Make the workflow faster, but leave the authority model unchanged.</p>
       </div>
       <div class="bad-answer-list">
-        <div><span>01</span><p><strong>Trust the SDK.</strong> Hope the prompt is strong enough.</p></div>
-        <div><span>02</span><p><strong>Mock the sandbox.</strong> Hide the risk in a perfect demo.</p></div>
-        <div><span>03</span><p><strong>DIY the harness.</strong> Rebuild controls differently on every team.</p></div>
-        <div><span>04</span><p><strong>Add an AI watcher.</strong> Notice the failure slightly sooner.</p></div>
+        <div class="fragment fade-left"><span>01</span><p><strong>Trust the SDK.</strong> Hope the prompt is strong enough.</p></div>
+        <div class="fragment fade-left"><span>02</span><p><strong>Mock the sandbox.</strong> Hide the risk in a perfect demo.</p></div>
+        <div class="fragment fade-left"><span>03</span><p><strong>DIY the harness.</strong> Rebuild controls differently on every team.</p></div>
+        <div class="fragment fade-left"><span>04</span><p><strong>Add an AI watcher.</strong> Notice the failure slightly sooner.</p></div>
       </div>
     </div>
-    <p class="bad-answer-thesis">
+    <p class="bad-answer-thesis fragment fade-up">
       A faster detector is not a control.
     </p>
     <aside class="notes">
@@ -292,16 +292,16 @@
   </section>
 
   <!-- Slide 7: Incident pivot -->
-  <section class="incident-slide">
+  <section class="incident-slide" data-background-gradient="linear-gradient(135deg, #f8fafc 0%, #fff7f7 48%, #faf7ff 100%)">
     <h2>The failure is not that the model was weird.<br/><span class="text-agent">The runtime had no boundaries.</span></h2>
     <ol class="incident-steps">
-      <li>A support agent reads a customer ticket.</li>
-      <li>Hostile instructions hide in normal text.</li>
-      <li>The agent calls an internal billing tool.</li>
-      <li>It exports account data because the tool allowed it.</li>
-      <li>The logs show API calls, but not the decision path.</li>
+      <li class="fragment fade-up">A support agent reads a customer ticket.</li>
+      <li class="fragment fade-up">Hostile instructions hide in normal text.</li>
+      <li class="fragment fade-up">The agent calls an internal billing tool.</li>
+      <li class="fragment fade-up">It exports account data because the tool allowed it.</li>
+      <li class="fragment fade-up">The logs show API calls, but not the decision path.</li>
     </ol>
-    <p class="incident-thesis">
+    <p class="incident-thesis fragment fade-up">
       Real defense is <strong>architecture</strong>, not automation.
     </p>
     <aside class="notes">
