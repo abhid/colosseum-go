@@ -97,7 +97,7 @@
       <ul>
         <li>This ties the title directly to the rest of the talk: AI was mostly about generated content; Intelligent Agents are about delegated action.</li>
         <li>Once a model can call tools, the question changes from "was the answer good?" to "what was it allowed to do?"</li>
-        <li>In this session: why agents change the security model; the top risks defenders need to care about; what governance looks like before execution; and a live Colosseum demo with approvals, contracts, telemetry, and replay.</li>
+        <li>In this session: why agents change the security model; the top risks defenders need to care about; what governance looks like before execution; and a live demo with approvals, contracts, telemetry, and replay.</li>
         <li>The risky agents are not toy chatbots. They are quiet automations wired into ticket queues, runbooks, source control, cloud APIs, and customer workflows.</li>
         <li>Healthcare, finance, and public-sector workflows cannot rely on "the prompt said not to."</li>
         <li>Teams will automate the work because the backlog is real and the tools are already here. If we wait for incidents, every team will build a different unsafe harness.</li>
@@ -252,7 +252,7 @@
         <li>Opaque execution consequences: unreproducible incidents, no audit trail, silent regressions.</li>
         <li>The attacker only needs the agent to confuse data with instructions once.</li>
         <li>The fix is not a longer prompt. The fix is a runtime that refuses impossible actions.</li>
-        <li>Every primitive in Colosseum maps back to these three failure modes.</li>
+        <li>Every control pattern we cover maps back to these three failure modes.</li>
       </ul>
     </aside>
   </section>
@@ -314,270 +314,217 @@
         <li>Better evals will not save you from an overreaching tool call.</li>
         <li>A stricter prompt will not recover a deleted bucket.</li>
         <li>An AI watching the agent will not either.</li>
-        <li>Colosseum is not a bot watching other bots. It is the control plane that decides what the agent can reach before it reaches for anything.</li>
-        <li>This is the agent equivalent of network segmentation.</li>
+        <li>The answer is not a bot watching other bots. It is a control plane that decides what the agent can reach before it reaches for anything.</li>
+        <li>Think of this as the agent equivalent of network segmentation.</li>
       </ul>
     </aside>
   </section>
 
-  <!-- ==================== ACT 2 — THE THESIS ==================== -->
+  <!-- ==================== ACT 2 — THE FIX PATTERN ==================== -->
 
-  <!-- Slide 7: Colosseum -->
-  <section>
-    <h2>Colosseum — an agent control plane</h2>
-    <p>Open source. Single Go binary. SQLite-backed. Embedded operator UI.</p>
-    <div class="grid-3" style="margin-top:1.2em;">
-      <div class="card"><span class="risk">identity</span><p>Agent profiles with bound models, configs, credentials.</p></div>
-      <div class="card"><span class="risk">least privilege</span><p>Per-agent tool allowlists and scoped credential vaults.</p></div>
-      <div class="card"><span class="risk">audit</span><p>Every run, step, tool call, event, and artifact persisted.</p></div>
-      <div class="card"><span class="risk">review</span><p>Policy gates, human approvals, output contracts.</p></div>
-      <div class="card"><span class="risk">replay</span><p>Reproduce any past run. Bundle it for forensics.</p></div>
-      <div class="card"><span class="risk">one binary</span><p>No cluster, no queue broker, no vendor lock-in.</p></div>
+  <!-- Slide 10: Core principle -->
+  <section class="fix-principle-slide" data-background-gradient="linear-gradient(135deg, #f8fafc 0%, #f7fbff 50%, #faf7ff 100%)">
+    <h2><span class="text-agent">LLM</span> for synthesis.<br/><span class="text-ai">Deterministic code</span> for guarantees.</h2>
+    <p class="fix-thesis">
+      If a property has to hold <strong>every time</strong>, it does not belong in a prompt.
+    </p>
+    <div class="fix-split">
+      <div>
+        <span class="risk">let the model</span>
+        <ul class="line-list">
+          <li>Reason</li>
+          <li>Summarize</li>
+          <li>Plan</li>
+          <li>Propose</li>
+          <li>Synthesize</li>
+        </ul>
+      </div>
+      <div>
+        <span class="risk">make code enforce</span>
+        <ul class="line-list">
+          <li>Identity</li>
+          <li>Permissions</li>
+          <li>Approvals</li>
+          <li>Contracts</li>
+          <li>Audit and replay</li>
+        </ul>
+      </div>
     </div>
     <aside class="notes">
-      The shape of the product: it's the control plane, not the model. Bring your own provider
-      (OpenAI, Anthropic, local), bring your own tools. Colosseum is the seatbelt and dashboard.
+      <ul>
+        <li>This is the design rule for the rest of the talk.</li>
+        <li>This is the positive turn: we are no longer talking about what goes wrong; we are talking about what the architecture must guarantee.</li>
+        <li>Do not ask the model to enforce its own allowlist.</li>
+        <li>Do not ask a second model to watch the first one and flag misbehavior.</li>
+        <li>Deterministic properties belong in deterministic code around the model.</li>
+        <li>Examples of properties that must hold every time: compliance, cost, blast radius, data access, approval requirements, and audit evidence.</li>
+        <li>This is what makes the answer architecture rather than automation.</li>
+      </ul>
     </aside>
   </section>
 
-  <!-- Slide 8: Core principle -->
-  <section class="centered">
-    <h2 style="margin-top:0.8em;">LLM for synthesis.<br/>Deterministic code for guarantees.</h2>
-    <p class="subtle" style="margin-top:1.4em;max-width:30em;margin-left:auto;margin-right:auto;">
-      Let the model do what only it can do — reason, summarize, suggest.<br/>
-      Keep enforcement, gating, and audit in code you can read.
-    </p>
-    <div class="callout" style="margin-top:1.8em;text-align:left;max-width:34em;margin-left:auto;margin-right:auto;">
-      If a property has to hold <strong>every time</strong> — compliance, cost, blast radius —<br/>
-      it doesn't belong in a prompt. And it doesn't belong in a detector either.
+  <!-- Slide 11: Identity + least privilege -->
+  <section class="control-slide" data-background-gradient="linear-gradient(135deg, #f8fafc 0%, #f7fbff 50%, #faf7ff 100%)">
+    <h2><span class="fix-label">Fix 1</span> Give agents <span class="text-agent">identity</span><br/>and least privilege.</h2>
+    <div class="control-grid">
+      <div class="control-card primary">
+        <span class="risk">named identity</span>
+        <p>Model, prompt, owner, provider config, tools, credentials, planning mode, output contract.</p>
+      </div>
+      <div class="control-card">
+        <span class="risk">tool allowlist</span>
+        <p>The agent sees only named, versioned, parameter-typed tools its profile allows.</p>
+      </div>
+      <div class="control-card">
+        <span class="risk">scoped secrets</span>
+        <p>Credentials are bound per agent and injected at the last possible moment.</p>
+      </div>
     </div>
-    <p class="subtle" style="margin-top:1.4em;max-width:36em;margin-left:auto;margin-right:auto;">
-      Every control in Colosseum is <strong>proactive</strong>: defined, versioned, and enforced
-      <em>before</em> the agent takes a step — not inferred from its exhaust afterwards.
-    </p>
+    <p class="control-thesis">If the agent cannot see it, it cannot call it.</p>
     <aside class="notes">
-      This is the design rule for the whole project. We do not ask the model to enforce its own
-      allowlist. We do not ask a second model to watch the first one and flag misbehavior. Those
-      are deterministic properties; they are enforced by code that runs around the model, before
-      the tool call leaves the process. That's what makes this architecture rather than automation.
+      <ul>
+        <li>An agent should be a named identity, not an anonymous script with a pile of environment variables.</li>
+        <li>A reviewable profile can include model, system prompt, provider config, tool allowlist, credential vault, planning mode, and output contract.</li>
+        <li>Tool examples: shell execution with per-agent cwd/env/timeout, file read/write, web fetch, browser navigation, HTTP request with URL allowlists, explicit agent-calls-agent tools.</li>
+        <li>If a tool is not in the allowlist, it is not callable. That must be enforced in the runtime, not in the prompt.</li>
+        <li>Denied calls are valuable evidence because they show what the agent tried to do, not just what succeeded.</li>
+        <li>Scoped credential vaults counter env-var sprawl and audit gaps. Values should be redacted from logs and UI by default.</li>
+        <li>Maps back to the earlier failures: least privilege limits tool overreach; scoped credentials reduce prompt-injection blast radius; named identity makes opaque execution easier to investigate.</li>
+      </ul>
     </aside>
   </section>
 
-  <!-- Slide 9: Architecture -->
+  <!-- Slide 12: Bounded execution -->
+  <section class="control-slide" data-background-gradient="linear-gradient(135deg, #f8fafc 0%, #f7fbff 50%, #faf7ff 100%)">
+    <h2><span class="fix-label">Fix 2</span> Bound the <span class="text-agent">execution environment</span>.</h2>
+    <div class="control-grid">
+      <div class="control-card primary">
+        <span class="risk">filesystem</span>
+        <p>Writes stay inside the session workspace unless a policy explicitly allows more.</p>
+      </div>
+      <div class="control-card">
+        <span class="risk">network</span>
+        <p>Egress is controlled by host or sandbox policy, not by model cooperation.</p>
+      </div>
+      <div class="control-card">
+        <span class="risk">runtime</span>
+        <p>Base image, volume mounts, resource limits, and session lifetime are pinned per run.</p>
+      </div>
+    </div>
+    <p class="control-thesis">Blast radius should be a design choice, not a surprise.</p>
+    <aside class="notes">
+      <ul>
+        <li>The shell tool is the sharpest knife in the drawer.</li>
+        <li>Bounded environments are how you keep it in a drawer.</li>
+        <li>Every run should be pin-able to an environment spec: base image, volume mounts, network policy, resource limits, and lifetime.</li>
+        <li>The default should be sandboxed execution. Host-mode should be a deliberate exception for trusted internal agents.</li>
+        <li>Blast radius becomes whatever the environment can reach, not whatever the laptop or server can reach.</li>
+        <li>Maps back to the earlier failures: even if prompt injection succeeds, the environment limits what the tool call can damage or reach.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- Slide 13: Human gates + contracts -->
+  <section class="control-slide" data-background-gradient="linear-gradient(135deg, #f8fafc 0%, #f7fbff 50%, #faf7ff 100%)">
+    <h2><span class="fix-label">Fix 3</span> Put <span class="text-agent">gates</span><br/>before risky actions.</h2>
+    <div class="control-grid">
+      <div class="control-card primary">
+        <span class="risk">policy</span>
+        <p>Deterministic predicates allow, deny, or request approval before tool calls execute.</p>
+      </div>
+      <div class="control-card">
+        <span class="risk">planning</span>
+        <p>High-risk agents produce a reviewable plan before any tool call.</p>
+      </div>
+      <div class="control-card">
+        <span class="risk">contracts</span>
+        <p>Outputs must satisfy schema or format constraints before the run is accepted.</p>
+      </div>
+    </div>
+    <p class="control-thesis">Pause before irreversible action. Validate before accepting output.</p>
+    <aside class="notes">
+      <ul>
+        <li>Policy should be code you can review and test, not prompt text you have to trust.</li>
+        <li>A risky tool call can be allowed, denied, or paused for human approval before it executes.</li>
+        <li>Approvals should capture who approved, why, and what arguments were approved.</li>
+        <li>Planning mode is useful for high-stakes agents: the agent proposes a plan and a human approves before tool use.</li>
+        <li>Output contracts turn qualitative checks into deterministic ones: JSON schema, regex, format constraints, retry feedback, and terminal errors on violation.</li>
+        <li>Maps back to the earlier failures: gates catch risky tool use before execution; contracts prevent "looks right" from becoming accepted output.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- Slide 14: Evidence + replay -->
+  <section class="control-slide" data-background-gradient="linear-gradient(135deg, #f8fafc 0%, #f7fbff 50%, #faf7ff 100%)">
+    <h2><span class="fix-label">Fix 4</span> Make the run <span class="text-agent">the evidence</span>.</h2>
+    <div class="control-grid evidence-grid">
+      <div class="control-card primary">
+        <span class="risk">execution graph</span>
+        <p>Runs, steps, tool calls, observations, events, spans, and artifacts are captured as structured data.</p>
+      </div>
+      <div class="control-card">
+        <span class="risk">forensics</span>
+        <p>Export a self-contained bundle instead of reconstructing an incident from screenshots and vibes.</p>
+      </div>
+      <div class="control-card">
+        <span class="risk">replay</span>
+        <p>Replay with recorded tool results or re-execute with changed policy to prove the fix.</p>
+      </div>
+    </div>
+    <p class="control-thesis">If you cannot replay the run, you do not have an audit trail.</p>
+    <aside class="notes">
+      <ul>
+        <li>Security teams care about this because the execution graph turns an agent incident from a mystery into a ticket.</li>
+        <li>Capture the outer run, planner/tool/observation steps, tool call arguments and results, policy decisions, approvals, errors, latency, artifacts, screenshots, patches, and traces.</li>
+        <li>When something goes wrong, you should not have to ask the vendor for their side of the story.</li>
+        <li>Export gives incident response a durable attachment.</li>
+        <li>Replay lets you test whether a tightened allowlist or changed policy would have stopped the bad path.</li>
+        <li>Maps back to the earlier failures: telemetry and replay turn opaque execution into evidence, forensics, and a provable fix.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- Slide 15: Colosseum reveal -->
+  <section class="colosseum-reveal-slide" data-background-gradient="linear-gradient(135deg, #f8fafc 0%, #eef6ff 45%, #f6f0ff 100%)">
+    <h2>So I built a <span class="text-agent">control plane</span>.</h2>
+    <p class="reveal-thesis">One place to define, enforce, observe, and replay agent runs.</p>
+    <div class="reveal-grid">
+      <div><span class="risk">bring your own</span><p>Models, providers, tools, and workflows.</p></div>
+      <div><span class="risk">enforce before action</span><p>Identity, allowlists, vaults, policy, approvals, contracts.</p></div>
+      <div><span class="risk">prove after action</span><p>Telemetry, artifacts, export, replay, and audit trail.</p></div>
+    </div>
+    <aside class="notes">
+      <ul>
+        <li>This is the first time we name the product.</li>
+        <li>Frame it as an implementation of the control pattern the audience just learned.</li>
+        <li>It is the control plane, not the model.</li>
+        <li>Open source. Single Go binary. SQLite-backed. Embedded operator UI.</li>
+        <li>Bring your own provider: OpenAI, Anthropic, local models.</li>
+        <li>Bring your own tools: the executor is pluggable.</li>
+        <li>The point is not "watch the agent harder"; the point is to decide what the agent can reach before it reaches for anything.</li>
+        <li>This slide is the bridge into the live demo: now we show the control pattern running.</li>
+      </ul>
+    </aside>
+  </section>
+
+  <!-- Slide 16: Architecture -->
   <section>
     <h2>Architecture</h2>
     <img src="assets/architecture.svg" alt="Colosseum architecture"
          style="width:100%;max-width:1000px;margin-top:0.3em;" />
     <p class="subtle" style="margin-top:0.6em;">
-      A single Go process. The UI, API, scheduler, and policy engine all live in the same binary.
+      A single Go process. The UI, API, runtime manager, and policy engine all live in the same binary.
       SQLite holds the graph of runs · steps · tool calls · events · spans.
     </p>
     <aside class="notes">
-      Operator UI is React SSE. API enforces auth and policy. The runtime manager owns the
-      step loop: plan → tool call → observation → repeat, until a terminal condition. Provider
-      adapters are pluggable. Everything observable is stored in SQLite; artifacts go to a
-      content-addressed store.
-    </aside>
-  </section>
-
-  <!-- ==================== ACT 3 — THE PRIMITIVES ==================== -->
-
-  <!-- Slide 10: Agent profile -->
-  <section>
-    <h2>Agent profiles — scoped identity</h2>
-    <p>An agent is a <strong>named identity</strong>: model + system prompt + bound provider config + tool allowlist + credential binding.</p>
-    <pre><code class="language-yaml">name: support-triage-bot
-model: claude-sonnet-4-6
-provider_config: anthropic-prod
-system_prompt: |
-  You are a support triage agent. You may read Zendesk and
-  the internal KB. You may not write to either.
-allowed_tools: [web.fetch, files.read, json.parse]
-credential_vault: zendesk-readonly
-planning_mode: required
-output_contract: schemas/triage-v1.json</code></pre>
-    <p class="subtle">One YAML file. One reviewable artifact. Version-controlled like any other deploy.</p>
-    <aside class="notes">
-      Counter to "credential sprawl per script." Every agent has a known identity. When you look
-      at a run, you know exactly which agent ran, on which config, with which tools and
-      credentials.
-    </aside>
-  </section>
-
-  <!-- Slide 11: Tool allowlist -->
-  <section>
-    <h2>Tool allowlist — least privilege, per agent</h2>
-    <div class="grid-2">
-      <div>
-        <p>Tools are <strong>named, versioned, parameter-typed</strong> functions. The agent sees only what its profile allows.</p>
-        <ul>
-          <li><code>shell.exec</code> — with per-agent cwd, env, timeout</li>
-          <li><code>files.read</code> · <code>files.write</code></li>
-          <li><code>web.fetch</code> · <code>browser.navigate</code></li>
-          <li><code>http.request</code> — with URL allowlist</li>
-          <li><code>subagent.invoke</code> — explicit agent-calls-agent</li>
-        </ul>
-      </div>
-      <div class="card">
-        <span class="risk">counter to</span>
-        <p><strong>Tool overreach.</strong> If a tool is not in the allowlist, it is not callable — enforced in the step loop, not in the prompt.</p>
-      </div>
-    </div>
-    <aside class="notes">
-      The allowlist is checked on every tool call attempt. Denied calls are recorded as events
-      so you can see <em>what the agent tried to do</em>, not just what it succeeded at.
-    </aside>
-  </section>
-
-  <!-- Slide 12: Credential vaults -->
-  <section>
-    <h2>Credential vaults — scoped secrets, bound per agent</h2>
-    <p>Named vaults hold secrets. Agents <strong>reference</strong> vaults; they never see raw values.</p>
-    <pre><code class="language-yaml">vaults:
-  - name: zendesk-readonly
-    entries:
-      ZENDESK_TOKEN: ${from: doppler, key: ZD_READ_ONLY}
-  - name: prod-deploy
-    entries:
-      AWS_SECRET_ACCESS_KEY: ${from: vault, path: secret/aws/prod}
-
-agents:
-  - name: support-triage-bot
-    credential_vault: zendesk-readonly   # can't touch prod-deploy
-</code></pre>
-    <p class="subtle">Injected into tool calls at the last possible moment. Redacted from logs and UI by default.</p>
-    <aside class="notes">
-      Counter to env-var sprawl and audit-trail gaps. The binding is auditable; the values are
-      not plaintext at rest; rotation happens in one place.
-    </aside>
-  </section>
-
-  <!-- Slide 13: Environments -->
-  <section>
-    <h2>Environments — Docker-first sandboxes</h2>
-    <div class="grid-2">
-      <div>
-        <p>Every run can be pinned to an <strong>environment spec</strong>: base image, volume mounts, network policy, resource limits.</p>
-        <ul>
-          <li>Default shell runs inside a named image</li>
-          <li>Filesystem writes bounded to the session workspace</li>
-          <li>Egress controlled by the host network policy</li>
-          <li>Session lifetime bounded — no zombie containers</li>
-        </ul>
-      </div>
-      <div class="card">
-        <span class="risk">counter to</span>
-        <p><strong>"It ran <code>rm -rf</code> on my laptop."</strong><br/>Blast radius is whatever the container can reach — nothing more.</p>
-      </div>
-    </div>
-    <aside class="notes">
-      The shell tool is the sharpest knife in the drawer. Environments are how you keep it in a
-      drawer. You can still run host-mode for trusted internal agents, but the default is
-      sandboxed.
-    </aside>
-  </section>
-
-  <!-- Slide 14: Policy + approvals -->
-  <section>
-    <h2>Policy &amp; approvals — the human gate</h2>
-    <p>Deterministic predicates run <strong>before</strong> risky tool calls. They can allow, deny, or request human approval.</p>
-    <pre><code class="language-go">// Example: require approval for any shell.exec that writes outside the sandbox
-policy.Rule{
-    Tool:  "shell.exec",
-    Match: func(a Args) bool { return writesOutside(a.Cwd, a.Cmd) },
-    Action: policy.RequireApproval,
-}</code></pre>
-    <p class="subtle">The agent pauses, a notification goes to the UI, a human approves or rejects — with a reason, captured in the audit log.</p>
-    <aside class="notes">
-      Policy is Go code you can review and test, not prompt text you have to trust. The human
-      approval loop is first-class in the UI — the presenter will show this in the demo.
-    </aside>
-  </section>
-
-  <!-- Slide 15: Output contracts -->
-  <section>
-    <h2>Output contracts — "looks good" isn't good enough</h2>
-    <div class="grid-2">
-      <div>
-        <p>Agents can be required to emit output matching a <strong>schema</strong> or regex before the run is accepted.</p>
-        <ul>
-          <li>JSON Schema validation</li>
-          <li>Regex / format constraints</li>
-          <li>Retries with feedback on validation failure</li>
-          <li>Contract violations are a terminal error, not a warning</li>
-        </ul>
-      </div>
-      <div class="card">
-        <span class="risk">counter to</span>
-        <p><strong>"The answer looked right, but it was wrong."</strong><br/>The contract turns a qualitative check into a deterministic one.</p>
-      </div>
-    </div>
-    <aside class="notes">
-      This is what lets you call an agent from a normal piece of code and actually trust the
-      return value. Without a contract you're doing string parsing on hallucinated JSON.
-    </aside>
-  </section>
-
-  <!-- Slide 16: Planning mode -->
-  <section>
-    <h2>Planning mode — force a reviewable plan</h2>
-    <p>Three modes, per agent:</p>
-    <div class="grid-3">
-      <div class="card"><span class="risk">off</span><p>Straight to execution. Fine for bounded, low-risk agents.</p></div>
-      <div class="card"><span class="risk">suggest</span><p>Agent proposes a plan; may execute without approval.</p></div>
-      <div class="card"><span class="risk">required</span><p>Agent proposes a plan; <strong>human approves before any tool call</strong>.</p></div>
-    </div>
-    <p class="subtle" style="margin-top:1.2em;">The plan is stored with the run. You can replay the run and show that the plan was followed.</p>
-    <aside class="notes">
-      Counter to opaque autonomy. For high-stakes agents — ones that touch prod or money — you
-      want "required." The plan is both a safety control and a debugging artifact.
-    </aside>
-  </section>
-
-  <!-- Slide 17: Telemetry -->
-  <section>
-    <h2>Telemetry — the run <em>is</em> the evidence</h2>
-    <div class="grid-2">
-      <div>
-        <p>Every run produces a structured graph:</p>
-        <ul>
-          <li><strong>Runs</strong> — the outermost unit, one per invocation</li>
-          <li><strong>Steps</strong> — planner / tool / observation cycles</li>
-          <li><strong>Tool calls</strong> — args, results, errors, latency</li>
-          <li><strong>Events</strong> — everything the runtime observed</li>
-          <li><strong>Spans</strong> — OpenTelemetry-compatible traces</li>
-          <li><strong>Artifacts</strong> — files, screenshots, patches</li>
-        </ul>
-      </div>
-      <div class="card">
-        <span class="risk">counter to</span>
-        <p><strong>"I can't prove what the agent did."</strong><br/>You can. It's in SQLite. It's queryable. It's exportable.</p>
-      </div>
-    </div>
-    <aside class="notes">
-      This is the part security teams care about most. The execution graph is what turns an agent
-      incident from a mystery into a ticket.
-    </aside>
-  </section>
-
-  <!-- Slide 18: Replay + export -->
-  <section>
-    <h2>Replay &amp; export — reproducible forensics</h2>
-    <p>Any past run can be replayed with the same inputs, tools mocked from the recorded results — or re-executed live with changed policy.</p>
-    <pre><code class="language-bash"># Export a run as a self-contained bundle
-colosseum export run-0f8c...  &gt; incident-2026-04-17.tar.gz
-
-# Replay against the original tool recordings
-colosseum replay run-0f8c...
-
-# Re-execute with a tightened allowlist to prove the fix
-colosseum replay run-0f8c... --override-agent hardened-triage
-</code></pre>
-    <p class="subtle">The export bundle is your incident write-up's attachment.</p>
-    <aside class="notes">
-      When something goes wrong, you don't ask the vendor for their side of the story. You have
-      the full trace, the tool responses, the policy decisions, and you can rerun them against
-      a fixed agent to prove the fix.
+      <ul>
+        <li>Now that the audience understands the control pattern, show how Colosseum implements it.</li>
+        <li>Operator UI is React with SSE for live run updates.</li>
+        <li>API enforces auth and policy.</li>
+        <li>The runtime manager owns the step loop: plan, tool call, observation, repeat until terminal condition.</li>
+        <li>Provider adapters are pluggable.</li>
+        <li>Everything observable is stored in SQLite; artifacts go to a content-addressed store.</li>
+      </ul>
     </aside>
   </section>
 

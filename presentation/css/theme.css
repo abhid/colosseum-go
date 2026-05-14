@@ -252,6 +252,12 @@
   line-height: 1.1;
   margin-bottom: 0.8em;
 }
+.reveal .incident-slide h2 {
+  width: min(100%, 980px);
+  margin-left: auto;
+  margin-right: auto;
+  text-align: left;
+}
 .reveal .failure-layout {
   display: grid;
   grid-template-columns: 1.2fr 1fr;
@@ -418,6 +424,140 @@
   background: rgba(124, 58, 237, 0.1);
   color: #7c3aed;
   font-weight: 700;
+}
+.reveal .fix-principle-slide h2,
+.reveal .control-slide h2,
+.reveal .colosseum-reveal-slide h2 {
+  font-size: 1.85em;
+  line-height: 1.08;
+  margin-bottom: 0.65em;
+}
+.reveal .fix-principle-slide h2 {
+  font-size: 2em;
+  width: min(100%, 920px);
+  margin-left: auto;
+  margin-right: auto;
+  text-align: left;
+}
+.reveal .fix-thesis,
+.reveal .control-thesis,
+.reveal .reveal-thesis {
+  width: min(100%, 860px);
+  margin: 0 auto 1em;
+  padding: 0.6em 0.8em;
+  border-radius: 13px;
+  background: linear-gradient(90deg, rgba(2, 132, 199, 0.08), rgba(124, 58, 237, 0.08));
+  color: #0f172a;
+  font-size: 0.9em;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.reveal .fix-label {
+  display: inline-flex;
+  margin-right: 0.45em;
+  padding: 0.26em 0.55em;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(124, 58, 237, 0.1);
+  color: #7c3aed;
+  font-family: var(--font-mono);
+  font-size: 0.42em;
+  font-weight: 700;
+  vertical-align: middle;
+  letter-spacing: 0;
+}
+.reveal .fix-split,
+.reveal .control-grid,
+.reveal .reveal-grid {
+  display: grid;
+  grid-template-columns: 1.18fr 0.91fr 0.91fr;
+  gap: 0.85em;
+  width: min(100%, 940px);
+  margin: 0 auto;
+  text-align: left;
+}
+.reveal .fix-split {
+  grid-template-columns: 1fr 1fr;
+  width: min(100%, 820px);
+}
+.reveal .fix-split > div,
+.reveal .control-card,
+.reveal .reveal-grid > div {
+  border: 1px solid var(--c-border);
+  border-radius: 13px;
+  background: #ffffff;
+  padding: 0.85em 0.95em;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
+}
+.reveal .fix-split > div {
+  border-top: 4px solid #0284c7;
+}
+.reveal .fix-split > div:nth-child(2) {
+  border-top-color: #7c3aed;
+}
+.reveal .control-card.primary,
+.reveal .reveal-grid > div:nth-child(2) {
+  border-color: rgba(124, 58, 237, 0.28);
+  background: linear-gradient(180deg, rgba(124, 58, 237, 0.08), rgba(255, 255, 255, 0.96));
+}
+.reveal .control-card.primary {
+  border-top: 4px solid #7c3aed;
+  padding: 1em 1.05em;
+  box-shadow: 0 18px 46px rgba(124, 58, 237, 0.11);
+}
+.reveal .control-card:not(.primary) {
+  border-top: 4px solid #0284c7;
+  opacity: 0.92;
+}
+.reveal .fix-split p,
+.reveal .control-card p,
+.reveal .reveal-grid p {
+  margin: 0.25em 0 0;
+  font-size: 0.72em;
+  line-height: 1.34;
+}
+.reveal .fix-split .risk,
+.reveal .control-card .risk,
+.reveal .reveal-grid .risk {
+  color: #0f172a;
+  font-size: 0.68em;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.reveal .line-list {
+  margin: 0.45em 0 0;
+  padding: 0;
+  list-style: none;
+}
+.reveal .line-list li {
+  margin: 0.12em 0;
+  color: var(--c-text-dim);
+  font-size: 0.72em;
+  line-height: 1.22;
+}
+.reveal .control-thesis {
+  margin-top: 1em;
+  margin-bottom: 0;
+  border-left: 4px solid #7c3aed;
+  text-align: left;
+}
+.reveal .colosseum-reveal-slide h2 {
+  font-size: 2.05em;
+}
+.reveal .reveal-thesis {
+  font-size: 0.95em;
+  border-left: 4px solid #7c3aed;
+  text-align: left;
+}
+.reveal .colosseum-reveal-slide .reveal-grid > div {
+  border-top: 4px solid #0284c7;
+}
+.reveal .colosseum-reveal-slide .reveal-grid > div:nth-child(2) {
+  border-top-color: #7c3aed;
+}
+.reveal .colosseum-reveal-slide .reveal-grid > div:nth-child(3) {
+  border-top-color: #059669;
 }
 
 .reveal p {
