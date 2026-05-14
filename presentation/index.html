@@ -257,9 +257,9 @@
     </aside>
   </section>
 
-  <!-- Slide 6: Bad answers -->
+  <!-- Slide 6: Incomplete answers -->
   <section class="bad-answers-slide" data-background-gradient="linear-gradient(135deg, #f8fafc 0%, #f7fbff 48%, #faf7ff 100%)">
-    <h2>The bad answers all share the same flaw:<br/><span class="text-agent">they react after trust was already granted.</span></h2>
+    <h2>The incomplete answers all share the same gap:<br/><span class="text-agent">they react after trust was already granted.</span></h2>
     <div class="bad-answer-layout">
       <div class="bad-answer-trap fragment fade-right">
         <span class="risk">the trap</span>
@@ -278,7 +278,7 @@
     <aside class="notes">
       <ul>
         <li>Show of hands: which of these do you have running right now?</li>
-        <li>The honest answer in many organizations is a mix of all four.</li>
+        <li>The honest answer in many organizations is a mix of all four. These are not stupid answers; they are incomplete answers.</li>
         <li>Be even-handed: SDKs are fine for prototypes; they are just not a governance model by themselves.</li>
         <li>Trust the SDK: pass your keys to the agent framework and hope the prompt is strong enough.</li>
         <li>Mocked sandboxes: great demos, unshippable in production, and the mocks hide the real risk.</li>
@@ -486,12 +486,22 @@
 
   <!-- Slide 15: Colosseum reveal -->
   <section class="colosseum-reveal-slide" data-background-gradient="linear-gradient(135deg, #f8fafc 0%, #eef6ff 45%, #f6f0ff 100%)">
-    <h2>So I built a <span class="text-agent">control plane</span>.</h2>
-    <p class="reveal-thesis">One place to define, enforce, observe, and replay agent runs.</p>
+    <div class="product-reveal">
+      <div>
+        <h2>That pattern became <span class="product-title">Colosseum</span>,<br/>an agent <span class="text-agent">control plane</span>.</h2>
+        <p class="reveal-thesis">One place to define, enforce, observe, and replay agent runs.</p>
+      </div>
+      <div class="product-badge">
+        <span>open source</span>
+        <strong>single Go binary</strong>
+        <span>Database backed</span>
+        <span>embedded UI</span>
+      </div>
+    </div>
     <div class="reveal-grid">
-      <div><span class="risk">bring your own</span><p>Models, providers, tools, and workflows.</p></div>
-      <div><span class="risk">enforce before action</span><p>Identity, allowlists, vaults, policy, approvals, contracts.</p></div>
-      <div><span class="risk">prove after action</span><p>Telemetry, artifacts, export, replay, and audit trail.</p></div>
+      <div><span class="risk">bring your own</span><p>Models<br/>Providers<br/>Tools<br/>Workflows</p></div>
+      <div><span class="risk">enforce before action</span><p>Identity<br/>Allowlists<br/>Policy<br/>Approvals</p></div>
+      <div><span class="risk">prove after action</span><p>Telemetry<br/>Artifacts<br/>Export<br/>Replay</p></div>
     </div>
     <aside class="notes">
       <ul>
@@ -573,7 +583,7 @@
   <!-- Slide 20: Confident deployment -->
   <section>
     <h2>Confident deployment</h2>
-    <p>Moving an agent from lab to prod today requires either blind faith or a bespoke harness. Colosseum is the harness.</p>
+    <p>Moving an agent from lab to prod today requires either blind faith or a bespoke harness. The harness is the missing layer.</p>
     <div class="callout">
       Evals tell you how often the agent is <em>right</em>.<br/>
       Runtime controls tell you what happens when it's <em>wrong</em>.
@@ -631,32 +641,33 @@
     </aside>
   </section>
 
-  <!-- Slide 23: Comparison table -->
+  <!-- Slide 23: Architecture options -->
   <section>
-    <h2>Colosseum vs. "just the SDK"</h2>
+    <h2>Architectural options</h2>
     <table>
       <thead>
         <tr>
-          <th></th>
-          <th>Raw SDK</th>
-          <th>Hosted agent product</th>
-          <th>Colosseum</th>
+          <th>Option</th>
+          <th>Good fit</th>
+          <th>Tradeoff</th>
+          <th>Control-plane shape</th>
         </tr>
       </thead>
       <tbody>
-        <tr><td>Tool allowlist per agent</td>      <td class="no">—</td>         <td class="no">partial</td>   <td class="yes">yes</td></tr>
-        <tr><td>Scoped credential vaults</td>       <td class="no">env vars</td>  <td class="no">vendor</td>    <td class="yes">yes</td></tr>
-        <tr><td>Human-in-loop approvals</td>        <td class="no">DIY</td>       <td class="no">limited</td>   <td class="yes">yes</td></tr>
-        <tr><td>Output contracts</td>               <td class="no">DIY</td>       <td class="no">partial</td>   <td class="yes">yes</td></tr>
-        <tr><td>Full telemetry &amp; replay</td>    <td class="no">—</td>         <td class="no">vendor-locked</td> <td class="yes">yes</td></tr>
-        <tr><td>Runs on your infra</td>             <td class="yes">yes</td>      <td class="no">—</td>          <td class="yes">yes</td></tr>
-        <tr><td>Single binary, no cluster</td>      <td class="yes">yes</td>      <td class="no">—</td>          <td class="yes">yes</td></tr>
+        <tr><td>Raw SDK</td><td>Prototypes, bounded internal tools</td><td>You own policy, approvals, secrets, telemetry, replay</td><td class="no">DIY</td></tr>
+        <tr><td>Hosted agent platform</td><td>Managed workflows, fast adoption</td><td>Control and evidence live in a vendor boundary</td><td class="no">outsourced</td></tr>
+        <tr><td>Build bespoke harness</td><td>Highly specific internal workflows</td><td>Every team may reinvent controls differently</td><td class="no">fragmented</td></tr>
+        <tr><td>Self-hosted control plane</td><td>Regulated, auditable, infra-owned agent deployment</td><td>You operate the runtime and policy surface</td><td class="yes">owned</td></tr>
       </tbody>
     </table>
     <aside class="notes">
-      Keep this even-handed. The SDK path is legitimate for prototypes. Hosted products are fine
-      if you accept the lock-in. Colosseum occupies the "self-hosted control plane" slot that's
-      otherwise empty.
+      <ul>
+        <li>Keep this even-handed. This is not "everyone else is wrong."</li>
+        <li>The SDK path is legitimate for prototypes and tightly bounded internal tools.</li>
+        <li>Hosted products can be a good fit if managed workflows and vendor-hosted evidence are acceptable.</li>
+        <li>Bespoke harnesses can work, but they tend to fragment policy, approvals, secrets, and audit across teams.</li>
+        <li>The self-hosted control plane option is for organizations that need infrastructure ownership, auditability, and explicit runtime governance.</li>
+      </ul>
     </aside>
   </section>
 
