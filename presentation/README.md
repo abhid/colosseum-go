@@ -1,6 +1,6 @@
-# Colosseum — Secure360 presentation
+# Secure360 presentation
 
-A static [reveal.js](https://revealjs.com/) deck for the Secure360 2026 Colosseum talk in Minneapolis. Self-contained HTML; no build step.
+A static [reveal.js](https://revealjs.com/) deck for a vendor-neutral Secure360 talk on governing intelligent agents. The main talk is 18 primary slides for a 45-minute presentation, followed by appendix slides for Q&A, references, demo fallback, implementation options, and attendee takeaway material.
 
 ## Run locally
 
@@ -10,93 +10,70 @@ python3 -m http.server 8080
 # open http://localhost:8080/
 ```
 
-In a second terminal, start the Colosseum server that the demo slide will iframe:
-
-```bash
-./bin/colosseum server --port 8001
-```
-
-Open the deck in a browser. The demo slide (slide 19) will auto-ping `http://localhost:8001/healthz` and show a green dot when it's reachable.
-
-## Configure the demo target
-
-The demo iframe reads a `?demo=<url>` query string:
-
-```
-http://localhost:8080/                            # defaults to http://localhost:8001
-http://localhost:8080/?demo=http://10.0.0.5:8001  # remote host on the conference LAN
-http://localhost:8080/?demo=https://colosseum.example.com   # deployed demo
-http://localhost:8080/?demo=video                 # swap the iframe for assets/demo-fallback.mp4
-```
-
-If you want a prerecorded fallback, drop an `.mp4` at `assets/demo-fallback.mp4` and use `?demo=video`.
-
 ## Speaker view
 
-Press `S` anywhere in the deck — reveal opens a second window with speaker notes, next-slide preview, and a timer. Every slide has notes in `<aside class="notes">`; the demo slide's notes are the full demo script.
+Press `S` anywhere in the deck. Reveal opens a second window with speaker notes, next-slide preview, and a timer. The main slides include spoken notes with:
+
+- first sentence
+- final sentence
+- cue bullets
+- timing guidance
+- pauses and audience interaction
+- transitions
+- what to skip if behind
+- demo fallback guidance
 
 ## PDF export
 
-Append `?print-pdf` and use Chrome's **Print → Save as PDF**:
+Append `?print-pdf` and use Chrome's **Print -> Save as PDF**:
 
-```
+```text
 http://localhost:8080/?print-pdf
 ```
 
-Fit-to-page, background graphics enabled. The demo iframe is hidden in `@media print` so the PDF doesn't try to render a live app.
+Use fit-to-page with background graphics enabled.
 
-## Deploy
+## Live demo prep
 
-Anything that serves static files works:
+The deck no longer embeds a localhost demo target. Keep the demo in a separate browser window so the audience deck stays clean and does not expose local URLs, tokens, or environment details.
 
-- **GitHub Pages** — push the `presentation/` folder to a branch, enable Pages. The `.nojekyll` file keeps Jekyll from eating the assets.
-- **Netlify / Vercel / Cloudflare Pages** — drop the folder in as a static site, no build command.
-- **S3 + CloudFront** — sync the folder to a bucket, serve behind CloudFront.
+Pre-talk checklist:
 
-### Mixed content (important)
+- [ ] Known-good demo run recorded.
+- [ ] Screenshots captured for agent profile, tool allowlist, scoped credentials, hostile ticket, approval/denial gate, run graph/evidence, and replay result.
+- [ ] Short fallback screen recording tested.
+- [ ] Local static demo dataset ready.
+- [ ] Clean reset command or clean demo environment ready.
+- [ ] Hosted model/API keys tested outside the audience deck.
+- [ ] Speaker-notes window opened and positioned on presenter display.
+- [ ] Screen zoom and font size tested from the back of the room.
 
-Browsers block an **HTTPS** page from iframing **HTTP** content. At the conference, the two supported setups are:
+Fallback trigger: if the live demo has not reached the approval/denial moment within 5 minutes, switch to the captured run.
 
-1. **Serve the deck over HTTP too** (e.g., GitHub Pages via a custom domain with HTTP kept on, or just host the deck on the presenter laptop). Simplest for a local demo.
-2. **Put the demo Colosseum on HTTPS**: `ngrok http 8001`, a VPS with Caddy, or a self-signed cert trusted on the presenter laptop.
+Fallback line:
 
-Use `?demo=video` as the bulletproof fallback — the deck works on HTTPS with no live target.
-
-### X-Frame-Options
-
-Colosseum intentionally sets no `X-Frame-Options` or restrictive `Content-Security-Policy: frame-ancestors` header — iframing is explicitly supported for this presentation and for embedded-operator scenarios. See `docs/07-security-reliability.md` for the reasoning.
-
-## Pre-talk checklist
-
-- [ ] `./bin/colosseum server --port 8001` running on the presenter laptop with the demo DB preset
-- [ ] Deck served via `python3 -m http.server 8080` (or deployed ahead of time)
-- [ ] Demo slide shows a green status dot
-- [ ] Speaker-notes window opened (`S`) and positioned on the second display
-- [ ] `assets/demo-fallback.mp4` recorded and playable via `?demo=video` as backup
-- [ ] Wifi/backup-hotspot tested
-- [ ] Screen zoom / font size tested from the back of the room
+> I'm going to switch to the captured run. Same scenario, same controls. The important part is not the randomness of the model response; it is where the runtime draws the boundary.
 
 ## Layout
 
-```
+```text
 presentation/
-├── index.html              # reveal shell + all 26 slides inline
-├── css/theme.css           # Colosseum palette overrides on reveal's black base
-├── js/config.js            # reveal init + ?demo=<url> handling + healthz ping
+├── index.html              # reveal shell + 18 main slides + appendix backup
+├── css/theme.css           # light Secure360/Colosseum visual theme
+├── js/config.js            # reveal init
 ├── assets/
-│   ├── logo.svg            # presentation logo matching ui/src/assets/colosseum-logo.svg
-│   ├── architecture.svg    # simplified architecture diagram
-│   └── threat-model.svg    # three-failure-mode illustration
-├── .nojekyll               # GitHub Pages: skip Jekyll
-└── README.md               # this file
+│   ├── logo.svg
+│   ├── architecture.svg
+│   └── threat-model.svg
+└── README.md
 ```
 
 ## Keyboard shortcuts
 
 | Key | Action |
 |-----|--------|
-| `N` / `→` | Next slide |
-| `P` / `←` | Previous slide |
+| `N` / `->` | Next slide |
+| `P` / `<-` | Previous slide |
 | `S` | Speaker notes window |
 | `F` | Fullscreen |
 | `Esc` / `O` | Slide overview |
