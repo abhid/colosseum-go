@@ -33,9 +33,12 @@
     aria-label="AI to IA: Intelligent Agents"
   >
     <aside class="notes">
-      Opening. Introduce self, thank Secure360 for having me. Frame the talk: not an ML talk, a
-      security talk about the infrastructure required to deploy agents safely. Promise a live demo
-      at the midpoint. Ask: how many people have an agent running against production today?
+      <ul>
+        <li>Introduce yourself and thank Secure360 for having you.</li>
+        <li>Frame the talk: this is not an ML talk; it is a security talk about the infrastructure required to deploy agents safely.</li>
+        <li>Promise a live demo at the midpoint.</li>
+        <li>Ask the room: how many people have an agent running against production today?</li>
+      </ul>
     </aside>
   </section>
 
@@ -68,9 +71,12 @@
       </div>
     </div>
     <aside class="notes">
-      Keep this fun and human. Establish credibility without turning it into a resume slide.
-      Mention the Secure360 listing role, then connect your builder background to the theme:
-      powerful tools are only useful when the operating model is mature enough to handle them.
+      <ul>
+        <li>Keep this fun and human; do not turn it into a resume slide.</li>
+        <li>Establish credibility quickly: Director, Technology Systems at Essentia Health; CEH, CCNA, CISSP.</li>
+        <li>Connect the builder background to the theme: powerful tools are only useful when the operating model is mature enough to handle them.</li>
+        <li>Use the healthcare lens lightly: useful automation still needs trust boundaries.</li>
+      </ul>
     </aside>
   </section>
 
@@ -171,6 +177,7 @@
         <li>Agents need the same basic operating discipline before they touch real systems.</li>
         <li>Identity, permissions, and supervision are the first-order controls.</li>
         <li>Training, audit, and offboarding are what make the operating model sustainable.</li>
+        <li>Do not read every card. Use this as a checklist visual, then move.</li>
       </ul>
     </aside>
   </section>
@@ -272,6 +279,7 @@
       <ul>
         <li>Show of hands: which of these do you have running right now?</li>
         <li>The honest answer in many organizations is a mix of all four.</li>
+        <li>Be even-handed: SDKs are fine for prototypes; they are just not a governance model by themselves.</li>
         <li>Trust the SDK: pass your keys to the agent framework and hope the prompt is strong enough.</li>
         <li>Mocked sandboxes: great demos, unshippable in production, and the mocks hide the real risk.</li>
         <li>DIY glue: every team re-implements approvals, audit, and secrets badly and differently.</li>
@@ -300,6 +308,7 @@
       <ul>
         <li>Keep this deliberately ordinary. This is not a sci-fi scenario.</li>
         <li>It is a support workflow with too much access and too little evidence.</li>
+        <li>Linger here. This is the moment where the room should feel: yes, this could happen here.</li>
         <li>The hard questions: What was the agent allowed to do? Who approved the action? Which credential was used? Can the same path run again tomorrow?</li>
         <li>Controls need to hold before the run, not detectors that fire after the damage.</li>
         <li>Better evals will not save you from an overreaching tool call.</li>
